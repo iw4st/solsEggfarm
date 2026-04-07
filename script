@@ -15,6 +15,7 @@ local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 local HttpService = game:GetService("HttpService")
 local VirtualInputManager = game:GetService("VirtualInputManager")
+local GuiService = game:GetService("GuiService")
 
 ---------------------------------------
 -- PLAYER
@@ -49,6 +50,9 @@ local Config = {
     AURA_MIN_PING = 6,       -- exponent: 10^6 = 1,000,000 (ping for auras rarer than 1 in 1M)
     MAX_EGG_HEIGHT = 130,
     SEARCH_INTERVAL = 1,
+    AUTO_USE_STRANGE_CONTROLLER = false,
+    AUTO_USE_BIOME_RANDOMIZER = false,
+    ITEM_USE_INTERVAL = 20,  -- minutes
 
     -- Webhooks
     WEBHOOK_URL = "",
@@ -57,6 +61,10 @@ local Config = {
     WEBHOOK_MERCHANTS = "",
     WEBHOOK_AURAS = "",
     WEBHOOK_ENABLED = false,
+    WEBHOOK_PING_ID = "",
+    PING_MERCHANT_JESTER = true,
+    PING_MERCHANT_RIN = true,
+    PING_MERCHANT_MARI = true,
 }
 
 local CONFIG_FILE = "SolsRngSettingsV3.json"
@@ -106,6 +114,8 @@ local State = {
     currentTarget = "—",
     currentEggInstance = nil,
     eggsFound = 0,
+    lastStrangeControllerUse = 0,
+    lastBiomeRandomizerUse = 0,
 }
 
 local ignoredEggs = setmetatable({}, {__mode = "k"})
@@ -942,7 +952,7 @@ local function createRaritySlider(yPos, label, configKey)
     end)
 end
 
-local function createWebhookInput(yPos, label, configKey)
+local function createWebhookInput(yPos, label, configKey, placeholder)
     local row = Instance.new("Frame")
     row.Size = UDim2.new(1, -10, 0, 52)
     row.BackgroundColor3 = Color3.fromRGB(22, 22, 32)
@@ -967,7 +977,7 @@ local function createWebhookInput(yPos, label, configKey)
     inputBox.BackgroundColor3 = Color3.fromRGB(12, 12, 18)
     inputBox.BorderSizePixel = 0
     inputBox.Text = Config[configKey] or ""
-    inputBox.PlaceholderText = "Paste webhook URL..."
+    inputBox.PlaceholderText = placeholder or "Paste webhook URL..."
     inputBox.TextColor3 = Color3.fromRGB(100, 180, 255)
     inputBox.PlaceholderColor3 = Color3.fromRGB(50, 50, 70)
     inputBox.TextSize = 9
@@ -1005,7 +1015,12 @@ createSettingsToggle(30, "Abyssal Auto Equip", "AUTO_EQUIP_ABYSSAL")
 createSettingsToggle(72, "Enable Webhooks", "WEBHOOK_ENABLED")
 createSettingsToggle(114, "Collect Clovers", "COLLECT_CLOVERS")
 
-createSectionHeader(160, "\u{1F39A}  Adjustments")
+createSectionHeader(160, "\u{1F3AE}  Auto Items")
+createSectionHeader(380, "\u{1F39A}  Adjustments")
+createSettingsToggle(186, "Use Strange Controller", "AUTO_USE_STRANGE_CONTROLLER")
+createSettingsToggle(228, "Use Biome Randomizer", "AUTO_USE_BIOME_RANDOMIZER")
+createSettingsSlider(270, "Use Interval (m)", 1, 60, "ITEM_USE_INTERVAL")
+
 createSettingsSlider(186, "Collect Dist", 2, 12, "PROMPT_DISTANCE")
 
 createSectionHeader(232, "\u{2728}  Aura Notifications")
@@ -1019,6 +1034,12 @@ createWebhookInput(470, "Weather / Biome", "WEBHOOK_WEATHER")
 createWebhookInput(526, "Rare Eggs", "WEBHOOK_RARE_EGGS")
 createWebhookInput(582, "Merchants", "WEBHOOK_MERCHANTS")
 createWebhookInput(638, "Aura Rolls", "WEBHOOK_AURAS")
+createWebhookInput(694, "Discord Ping ID", "WEBHOOK_PING_ID", "Paste Discord ID...")
+
+createSectionHeader(750, "\u{1F4E2}  Merchant Pings")
+createSettingsToggle(776, "Ping on Jester", "PING_MERCHANT_JESTER")
+createSettingsToggle(818, "Ping on Rin", "PING_MERCHANT_RIN")
+createSettingsToggle(860, "Ping on Mari", "PING_MERCHANT_MARI")
 
 local settingsOpen = false
 local function openSettings()
@@ -1431,7 +1452,7 @@ webhookTitle.Font = Enum.Font.GothamBold
 webhookTitle.TextXAlignment = Enum.TextXAlignment.Left
 webhookTitle.Parent = SettingsScroll
 
-local function createWebhookInput(yPos, label, configKey)
+local function createWebhookInput(yPos, label, configKey, placeholder)
     local row = Instance.new("Frame")
     row.Size = UDim2.new(1, -20, 0, 48)
     row.Position = UDim2.new(0, 10, 0, yPos)
@@ -1457,7 +1478,7 @@ local function createWebhookInput(yPos, label, configKey)
     inputBox.BackgroundColor3 = Color3.fromRGB(16, 16, 22)
     inputBox.BorderSizePixel = 0
     inputBox.Text = Config[configKey] or ""
-    inputBox.PlaceholderText = "Paste webhook URL..."
+    inputBox.PlaceholderText = placeholder or "Paste webhook URL..."
     inputBox.TextColor3 = Color3.fromRGB(100, 180, 255)
     inputBox.PlaceholderColor3 = Color3.fromRGB(60, 60, 80)
     inputBox.TextSize = 8
@@ -1493,6 +1514,7 @@ createWebhookInput(406, "Weather / Biome", "WEBHOOK_WEATHER")
 createWebhookInput(458, "Rare Eggs", "WEBHOOK_RARE_EGGS")
 createWebhookInput(510, "Merchants", "WEBHOOK_MERCHANTS")
 createWebhookInput(562, "Aura Rolls", "WEBHOOK_AURAS")
+createWebhookInput(614, "Discord Ping ID", "WEBHOOK_PING_ID", "Paste Discord ID...")
 --]]
 
 
@@ -1695,6 +1717,279 @@ local function fireProximityPromptSafe(prompt)
 end
 
 ---------------------------------------
+-- ITEM AUTO-USE SYSTEM
+---------------------------------------
+local function smartClickBtn(button)
+    if not button then return false end
+
+    -- VirtualInputManager is the only reliable way to fire UI elements.
+    pcall(function()
+        local pos = button.AbsolutePosition
+        local size = button.AbsoluteSize
+        local inset = GuiService:GetGuiInset()
+        
+        local cx = pos.X + (size.X / 2)
+        local cy = pos.Y + (size.Y / 2) + inset.Y
+        
+        VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, true, game, 1)
+        task.wait(0.05)
+        VirtualInputManager:SendMouseButtonEvent(cx, cy, 0, false, game, 1)
+    end)
+    return true
+end
+
+local function isGameInventoryVisible()
+    local pg = Player:FindFirstChild("PlayerGui")
+    if not pg then return false end
+    local mi = pg:FindFirstChild("MainInterface")
+    if not mi then return false end
+    local inv = mi:FindFirstChild("Inventory")
+    if not inv then return false end
+    return inv.Visible and inv.AbsolutePosition.X > -500
+end
+
+local function toggleGameInventory()
+    local pg = Player:FindFirstChild("PlayerGui")
+    if not pg then return false end
+
+    local mi = pg:FindFirstChild("MainInterface")
+    if not mi then return false end
+    local sb = mi:FindFirstChild("SideButtons")
+    if not sb then return false end
+
+    local invBtn = nil
+    for _, child in ipairs(sb:GetChildren()) do
+        if child:IsA("TextButton") or child:IsA("ImageButton") then
+            local usage = child:FindFirstChild("Usage")
+            if usage and usage:IsA("TextLabel") and usage.Text == "Inventory" then
+                invBtn = child
+                break
+            end
+        end
+    end
+
+    if not invBtn then
+        local btns = {}
+        for _, child in ipairs(sb:GetChildren()) do
+            if child:IsA("TextButton") or child:IsA("ImageButton") then
+                table.insert(btns, child)
+            end
+        end
+        table.sort(btns, function(a, b) return a.AbsolutePosition.Y < b.AbsolutePosition.Y end)
+        invBtn = btns[1]
+    end
+
+    if invBtn then
+        smartClickBtn(invBtn)
+        task.wait(0.3)
+        return true
+    end
+    return false
+end
+
+local function useGameItem(itemName)
+    local pg = Player:FindFirstChild("PlayerGui")
+    if not pg then return false, "PlayerGui not found" end
+
+    local mi = pg:FindFirstChild("MainInterface")
+    if not mi then return false, "MainInterface not found" end
+
+    local inv = mi:FindFirstChild("Inventory")
+    if not inv then return false, "Inventory not found" end
+
+    local wasOpen = isGameInventoryVisible()
+    if not wasOpen then
+        toggleGameInventory()
+        task.wait(0.5)
+        if not isGameInventoryVisible() then
+            return false, "Failed to open inventory"
+        end
+    end
+
+    -- Switch to the 'ItemsTab' specifically
+    pcall(function()
+        local itemsFrame = inv:FindFirstChild("Items")
+        if itemsFrame then
+            local itemsTab = itemsFrame:FindFirstChild("ItemsTab")
+            if itemsTab then
+                smartClickBtn(itemsTab)
+                task.wait(0.3)
+            end
+        end
+    end)
+
+    -- Click the QuickCategory button (Tool / Remote filter) by its exact Image ID
+    pcall(function()
+        local quickCategory = inv:FindFirstChild("QuickCategory")
+        if quickCategory then
+            local targetBtn = nil
+            for _, child in ipairs(quickCategory:GetChildren()) do
+                if child:IsA("ImageButton") then
+                    local iconLabel = nil
+                    for _, desc in ipairs(child:GetDescendants()) do
+                        if desc:IsA("ImageLabel") and desc.Image == "rbxassetid://100436585165147" then
+                            iconLabel = desc
+                            break
+                        end
+                    end
+                    
+                    if iconLabel then
+                        if iconLabel.Parent:IsA("ImageButton") then
+                            targetBtn = iconLabel.Parent
+                        else
+                            targetBtn = child
+                        end
+                        break
+                    end
+                end
+            end
+            
+            if targetBtn then
+                smartClickBtn(targetBtn)
+                task.wait(0.4)
+            end
+        end
+    end)
+
+    local gridFrame = nil
+    pcall(function()
+        gridFrame = inv.Items.ItemGrid.ItemGridScrollingFrame
+    end)
+
+    if not gridFrame then
+        pcall(function()
+            for _, desc in ipairs(inv:GetDescendants()) do
+                if desc:IsA("ScrollingFrame") and desc.Name:find("Grid") then
+                    gridFrame = desc
+                    break
+                end
+            end
+        end)
+    end
+
+    if not gridFrame then
+        if not wasOpen then toggleGameInventory() end
+        return false, "Item grid not found"
+    end
+
+    local itemFrame = nil
+    local searchNames = {
+        "Item\n" .. itemName,
+        itemName,
+        "item\n" .. itemName,
+    }
+
+    for _, searchName in ipairs(searchNames) do
+        itemFrame = gridFrame:FindFirstChild(searchName)
+        if itemFrame then break end
+    end
+
+    if not itemFrame then
+        for _, child in ipairs(gridFrame:GetChildren()) do
+            if child.Name:find(itemName) then
+                itemFrame = child
+                break
+            end
+        end
+    end
+
+    if not itemFrame then
+        if not wasOpen then toggleGameInventory() end
+        return false, "Item '" .. itemName .. "' not found."
+    end
+
+    local itemBtn = itemFrame:FindFirstChild("Button") or itemFrame:FindFirstChildWhichIsA("TextButton") or itemFrame:FindFirstChildWhichIsA("ImageButton")
+    if not itemBtn then
+        if itemFrame:IsA("TextButton") or itemFrame:IsA("ImageButton") then
+            itemBtn = itemFrame
+        else
+            if not wasOpen then toggleGameInventory() end
+            return false, "No clickable button in item frame"
+        end
+    end
+
+    smartClickBtn(itemBtn)
+    task.wait(0.4)
+
+    local useBtn = nil
+
+    pcall(function()
+        useBtn = inv.Index.ItemIndex.UseHolder.UseButton
+    end)
+
+    if not useBtn then
+        for _, desc in ipairs(inv:GetDescendants()) do
+            if (desc.Name == "UseButton" or desc.Name == "Use") and
+               (desc:IsA("TextButton") or desc:IsA("ImageButton")) then
+                useBtn = desc
+                break
+            end
+        end
+    end
+
+    if not useBtn or not useBtn.Visible then
+        if not wasOpen then toggleGameInventory() end
+        return false, "Use button hidden/missing"
+    end
+
+    smartClickBtn(useBtn)
+    task.wait(0.3)
+
+    if not wasOpen then
+        toggleGameInventory()
+    end
+
+    return true, "Successfully used " .. itemName
+end
+
+local function tryAutoUseItems()
+    local now = tick()
+    local interval = Config.ITEM_USE_INTERVAL * 60
+
+    if Config.AUTO_USE_STRANGE_CONTROLLER then
+        if (now - State.lastStrangeControllerUse) >= interval then
+            setStatus("Using Strange Controller...", Color3.fromRGB(255, 200, 50))
+            local ok, msg = useGameItem("Strange Controller")
+            if ok then
+                State.lastStrangeControllerUse = now
+                warn("[AutoItem] Strange Controller used")
+            else
+                warn("[AutoItem] Strange Controller failed: " .. tostring(msg))
+            end
+            task.wait(0.5)
+        end
+    end
+
+    if Config.AUTO_USE_BIOME_RANDOMIZER then
+        local shouldUseBiome = false
+        
+        if Config.AUTO_USE_STRANGE_CONTROLLER then
+            if State.lastStrangeControllerUse > 0 and 
+               State.lastBiomeRandomizerUse < State.lastStrangeControllerUse and 
+               (now - State.lastStrangeControllerUse) >= 300 then
+                 shouldUseBiome = true
+            end
+        else
+            if (now - State.lastBiomeRandomizerUse) >= interval then
+                shouldUseBiome = true
+            end
+        end
+
+        if shouldUseBiome then
+            setStatus("Using Biome Randomizer...", Color3.fromRGB(255, 200, 50))
+            local ok, msg = useGameItem("Biome Randomizer")
+            if ok then
+                State.lastBiomeRandomizerUse = now
+                warn("[AutoItem] Biome Randomizer used")
+            else
+                warn("[AutoItem] Biome Randomizer failed: " .. tostring(msg))
+            end
+            task.wait(0.5)
+        end
+    end
+end
+
+---------------------------------------
 -- WEBHOOKS (будем переделывать потом)
 ---------------------------------------
 local WEATHER_COLORS = {
@@ -1856,6 +2151,16 @@ local function stripRichText(text)
     return stripped
 end
 
+local function getPingText()
+    if Config.WEBHOOK_PING_ID and Config.WEBHOOK_PING_ID ~= "" then
+        local id = string.gsub(Config.WEBHOOK_PING_ID, "[^%d]", "")
+        if id ~= "" then
+            return "<@" .. id .. ">"
+        end
+    end
+    return ""
+end
+
 local function sendGenericWebhook(webhookUrl, title, description, color, ping, fields)
     -- Debug: check if webhooks are enabled
     if not Config.WEBHOOK_ENABLED then
@@ -1941,14 +2246,15 @@ local function checkMerchantMessage(text)
     
     if string.find(lowerText, "jester") then
         merchantName = "Jester"
-        ping = "<@1289915272731295787>"
+        ping = Config.PING_MERCHANT_JESTER and getPingText() or ""
         color = 16711680  -- red
     elseif string.find(lowerText, "rin") then
         merchantName = "Rin"
-        ping = "<@1289915272731295787>"
+        ping = Config.PING_MERCHANT_RIN and getPingText() or ""
         color = 3447003  -- blue
     elseif string.find(lowerText, "mari") then
         merchantName = "Mari"
+        ping = Config.PING_MERCHANT_MARI and getPingText() or ""
         color = 16761035  -- pink
     end
     
@@ -2060,7 +2366,7 @@ local function checkAuraRollMessage(text)
     local minPing = math.pow(10, Config.AURA_MIN_PING)
     local ping = ""
     if chanceNumber >= minPing then
-        ping = "<@1289915272731295787>"
+        ping = getPingText()
     end
 
     local fields = {
@@ -2131,7 +2437,7 @@ local function checkRareEggMessage(text)
                         emoji .. " RARE EGG SPAWNED!",
                         "A very rare egg: **" .. v[2] .. "** just spawned!\nMessage: `" .. cleanText .. "`",
                         getRareEggColor(v[2]),
-                        "<@1289915272731295787>",
+                        getPingText(),
                         buildRarityFields(v[2])
                     )
                 end)
@@ -2192,7 +2498,7 @@ local function scanForRareEggs()
                     "RARE EGG FOUND IN MAP!",
                     "Script detected a rare egg: **" .. rareName .. "**\nNavigating to collect it!",
                     getRareEggColor(rareName),
-                    "<@1289915272731295787>",
+                    getPingText(),
                     buildRarityFields(rareName)
                 )
                 task.delay(120, function() recentlyNotifiedEggs["explorer_" .. rareName] = nil end)
@@ -2431,6 +2737,21 @@ local function autoEquipAbyssal()
     setStatus("Equipping Abyssal...", Color3.fromRGB(140, 60, 255))
     toggleInventory()
 
+    task.wait(0.2)
+    -- Switch to the 'Regular' tab before searching
+    for _, obj in ipairs(PlayerGui:GetDescendants()) do
+        if (obj:IsA("TextLabel") or obj:IsA("TextButton")) and string.match(string.lower(obj.Text), "^regular") then
+            if obj.AbsoluteSize.X > 0 and obj.AbsoluteSize.Y > 0 then
+                local btn = obj:IsA("GuiButton") and obj or obj:FindFirstAncestorWhichIsA("GuiButton")
+                if btn then
+                    cleverClick(btn)
+                    break
+                end
+            end
+        end
+    end
+    task.wait(0.2)
+
     local auraClicked = false
     for _, obj in ipairs(PlayerGui:GetDescendants()) do
         if (obj:IsA("TextLabel") or obj:IsA("TextButton")) and string.match(string.lower(obj.Text), "abyssal") then
@@ -2666,6 +2987,9 @@ local function startFarming()
                 task.wait(0.5)
             end
         end
+
+        -- Auto-use items (Strange Controller, Biome Randomizer)
+        pcall(tryAutoUseItems)
 
         -- Scan for rare eggs in explorer
         pcall(scanForRareEggs)

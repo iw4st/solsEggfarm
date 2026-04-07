@@ -1600,18 +1600,11 @@ local function initPathAgent()
     if pathAgent then pathAgent:Destroy() end
     if not SimplePath or not character then return end
 
-    -- Removing WaypointSpacing completely!
-    -- If WaypointSpacing is forced (e.g. 4), Roblox creates tiny waypoints everywhere.
-    -- On flat straight roads, this causes Humanoid:MoveTo() to constantly trigger
-    -- and decelerate at high speeds. Stripping it lets Roblox optimize straight lines.
-    pathAgent = SimplePath.new(character, {
-        AgentRadius     = 3,
-        AgentHeight     = 5.5,
-        AgentCanJump    = true,
-        AgentCanClimb   = true,
-        AgentJumpHeight = 7.2,
-        Costs = { Water = 100, Climb = 1 },
-    })
+    -- Using SimplePath with no custom parameters ensures that Roblox PathfindingService
+    -- dynamically calculates the exact bounds of the character.
+    -- This completely fixes the "walk-stop-walk-stop" stuttering caused by
+    -- false "Blocked" path recalculations.
+    pathAgent = SimplePath.new(character)
 end
 
 if character then initPathAgent() end
@@ -2570,18 +2563,25 @@ local function moveToEgg(egg)
         isCompleted = true
     end)
 
+    local lastRunTime = 0
     conBlocked = pathAgent.Blocked:Connect(function()
-        pcall(function() pathAgent:Run(egg.part.Position) end)
+        if tick() - lastRunTime > 0.5 then
+            lastRunTime = tick()
+            pcall(function() pathAgent:Run(egg.part.Position) end)
+        end
     end)
 
     conError = pathAgent.Error:Connect(function()
-        errors = errors + 1
-        if humanoid then
-            humanoid.Jump = true
-            humanoid:MoveTo(rootPart.Position + rootPart.CFrame.RightVector * math.random(-4, 4))
+        if tick() - lastRunTime > 0.5 then
+            lastRunTime = tick()
+            errors = errors + 1
+            if humanoid then
+                humanoid.Jump = true
+                humanoid:MoveTo(rootPart.Position + rootPart.CFrame.RightVector * math.random(-4, 4))
+            end
+            task.wait(0.2)
+            pcall(function() pathAgent:Run(egg.part.Position) end)
         end
-        task.wait(0.2)
-        pcall(function() pathAgent:Run(egg.part.Position) end)
     end)
 
     conWaypoint = pathAgent.WaypointReached:Connect(function()

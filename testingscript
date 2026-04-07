@@ -1599,6 +1599,13 @@ local pathAgent = nil
 local function initPathAgent()
     if pathAgent then pathAgent:Destroy() end
     if not SimplePath or not character then return end
+    
+    local ws = humanoid and humanoid.WalkSpeed or 16
+    local spacing = Config.WaypointSpacing or 4
+    if ws > 20 then
+        -- For very high speeds, increase waypoint spacing to prevent stuttering
+        spacing = math.max(spacing, math.floor(ws / 3.5))
+    end
 
     pathAgent = SimplePath.new(character, {
         AgentRadius     = 3,
@@ -1606,7 +1613,7 @@ local function initPathAgent()
         AgentCanJump    = true,
         AgentCanClimb   = true,
         AgentJumpHeight = 7.2,
-        WaypointSpacing = 3,
+        WaypointSpacing = spacing,
         Costs = { Water = 100, Climb = 1 },
     })
 end
@@ -2110,6 +2117,26 @@ local function identifyRareEgg(obj)
     return nil
 end
 
+local function buildTreeString(rootObj)
+    local str = ""
+    local maxCount = 30
+    local count = 0
+    local function traverse(node, indent)
+        for _, child in ipairs(node:GetChildren()) do
+            if count >= maxCount then return end
+            str = str .. indent .. "└─ " .. child.Name .. " [" .. child.ClassName .. "]\n"
+            count = count + 1
+            traverse(child, indent .. "  ")
+        end
+    end
+    traverse(rootObj, "")
+    if count >= maxCount then
+        str = str .. "  ... (truncated)\n"
+    end
+    if str == "" then return "" end
+    return "\n**Children:**\n```\n" .. str .. "```"
+end
+
 local function checkRareEggMessage(text)
     if not text or typeof(text) ~= "string" then return end
     -- Strip rich text / HTML tags before matching and sending
@@ -2128,7 +2155,7 @@ local function checkRareEggMessage(text)
                         if (obj:IsA("Model") or obj:IsA("BasePart")) and not isEggName(obj.Name) then
                             local rn = identifyRareEgg(obj)
                             if rn == v[2] then
-                                eggPath = "`" .. obj:GetFullName() .. "`"
+                                eggPath = "`" .. obj:GetFullName() .. "`" .. buildTreeString(obj)
                                 break
                             end
                         end
@@ -2198,7 +2225,7 @@ local function scanForRareEggs()
                 sendGenericWebhook(
                     Config.WEBHOOK_RARE_EGGS,
                     "RARE EGG FOUND IN MAP!",
-                    "Script detected a rare egg: **" .. rareName .. "**\nPath: `" .. obj:GetFullName() .. "`\nNavigating to collect it!",
+                    "Script detected a rare egg: **" .. rareName .. "**\nPath: `" .. obj:GetFullName() .. "`" .. buildTreeString(obj) .. "\nNavigating to collect it!",
                     getRareEggColor(rareName),
                     "<@1289915272731295787>",
                     buildRarityFields(rareName)
@@ -2232,7 +2259,7 @@ local rareEggAddedConn = Workspace.DescendantAdded:Connect(function(obj)
                 sendGenericWebhook(
                     Config.WEBHOOK_RARE_EGGS,
                     "✨ RARE EGG JUST SPAWNED!",
-                    "A rare egg just appeared: **" .. rareName .. "**\nPath: `" .. obj:GetFullName() .. "`\nScript is collecting it!",
+                    "A rare egg just appeared: **" .. rareName .. "**\nPath: `" .. obj:GetFullName() .. "`" .. buildTreeString(obj) .. "\nScript is collecting it!",
                     getRareEggColor(rareName),
                     "<@1289915272731295787>",
                     buildRarityFields(rareName)
@@ -2523,6 +2550,9 @@ local function moveToEgg(egg)
     if Config.WALK_SPEED_BOOST > 0 and humanoid then
         humanoid.WalkSpeed = Config.WALK_SPEED_BOOST
     end
+    
+    -- Optimize pathAgent spacing for current walk speed to prevent stuttering
+    initPathAgent()
 
     local maxErrors = Config.PATH_RECOMPUTE_MAX * 3
     local errors = 0

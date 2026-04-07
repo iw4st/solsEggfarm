@@ -1015,7 +1015,7 @@ createSettingsToggle(30, "Abyssal Auto Equip", "AUTO_EQUIP_ABYSSAL")
 createSettingsToggle(72, "Enable Webhooks", "WEBHOOK_ENABLED")
 createSettingsToggle(114, "Collect Clovers", "COLLECT_CLOVERS")
 
-createSectionHeader(160, "\u{1F3AE}  Auto Items(some may not work on mobile)")
+createSectionHeader(160, "\u{1F3AE}  Auto Items")
 createSectionHeader(380, "\u{1F39A}  Adjustments")
 createSettingsToggle(186, "Use Strange Controller", "AUTO_USE_STRANGE_CONTROLLER")
 createSettingsToggle(228, "Use Biome Randomizer", "AUTO_USE_BIOME_RANDOMIZER")
@@ -3010,6 +3010,14 @@ local function startFarming()
                         "<@1289915272731295787>",
                         buildRarityFields(rareEgg.name)
                     )
+                    task.wait(0.3)
+                    if Config.Enabled then
+                        task.spawn(function()
+                            if State.FarmThread then pcall(function() task.cancel(State.FarmThread) end) end
+                            State.FarmThread = task.spawn(startFarming)
+                        end)
+                        return
+                    end
                 end
                 task.wait(0.3)
             end
@@ -3029,8 +3037,15 @@ local function startFarming()
                         local freshEggs = findAllEggs()
                         if #freshEggs > 0 then break end
                         if clover.part and clover.part.Parent then
-                            moveToEgg(clover)
+                            local collected = moveToEgg(clover)
                             task.wait(0.3)
+                            if collected and Config.Enabled then
+                                task.spawn(function()
+                                    if State.FarmThread then pcall(function() task.cancel(State.FarmThread) end) end
+                                    State.FarmThread = task.spawn(startFarming)
+                                end)
+                                return
+                            end
                         end
                     end
                 else
@@ -3051,8 +3066,15 @@ local function startFarming()
             -- Check rare queue mid-loop (interrupt normal farming for rare eggs)
             if #rareEggQueue > 0 then break end
             if egg.part and egg.part.Parent then
-                moveToEgg(egg)
+                local collected = moveToEgg(egg)
                 task.wait(0.3)
+                if collected and Config.Enabled then
+                    task.spawn(function()
+                        if State.FarmThread then pcall(function() task.cancel(State.FarmThread) end) end
+                        State.FarmThread = task.spawn(startFarming)
+                    end)
+                    return
+                end
             end
         end
 

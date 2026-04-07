@@ -1015,7 +1015,7 @@ createSettingsToggle(30, "Abyssal Auto Equip", "AUTO_EQUIP_ABYSSAL")
 createSettingsToggle(72, "Enable Webhooks", "WEBHOOK_ENABLED")
 createSettingsToggle(114, "Collect Clovers", "COLLECT_CLOVERS")
 
-createSectionHeader(160, "\u{1F3AE}  Auto Items")
+createSectionHeader(160, "\u{1F3AE}  Auto Items(some may not work on mobile)")
 createSectionHeader(380, "\u{1F39A}  Adjustments")
 createSettingsToggle(186, "Use Strange Controller", "AUTO_USE_STRANGE_CONTROLLER")
 createSettingsToggle(228, "Use Biome Randomizer", "AUTO_USE_BIOME_RANDOMIZER")

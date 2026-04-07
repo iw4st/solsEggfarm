@@ -1599,21 +1599,17 @@ local pathAgent = nil
 local function initPathAgent()
     if pathAgent then pathAgent:Destroy() end
     if not SimplePath or not character then return end
-    
-    local ws = humanoid and humanoid.WalkSpeed or 16
-    local spacing = Config.WaypointSpacing or 4
-    if ws > 20 then
-        -- For very high speeds, increase waypoint spacing to prevent stuttering
-        spacing = math.max(spacing, math.floor(ws / 3.5))
-    end
 
+    -- Removing WaypointSpacing completely!
+    -- If WaypointSpacing is forced (e.g. 4), Roblox creates tiny waypoints everywhere.
+    -- On flat straight roads, this causes Humanoid:MoveTo() to constantly trigger
+    -- and decelerate at high speeds. Stripping it lets Roblox optimize straight lines.
     pathAgent = SimplePath.new(character, {
         AgentRadius     = 3,
         AgentHeight     = 5.5,
         AgentCanJump    = true,
         AgentCanClimb   = true,
         AgentJumpHeight = 7.2,
-        WaypointSpacing = spacing,
         Costs = { Water = 100, Climb = 1 },
     })
 end
@@ -2816,4 +2812,3 @@ if Config.Enabled then
 end
 
 warn("[SolsFarm] V3 Settings Script fully loaded and successfully started!")
- 

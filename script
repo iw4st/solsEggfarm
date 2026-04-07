@@ -2817,6 +2817,10 @@ local function collectEgg(egg)
     task.spawn(function()
         sendWebhook(egg.name)
     end)
+    
+    if humanoid and humanoid.Health > 0 then
+        humanoid.Health = 0
+    end
 end
 
 ---------------------------------------
@@ -2969,6 +2973,8 @@ local function startFarming()
     setStatus("Starting...", Color3.fromRGB(0, 200, 255))
     task.wait(0.5)
 
+    local idleStartTime = tick()
+
     while Config.Enabled do
         checkWeather()
 
@@ -3025,6 +3031,10 @@ local function startFarming()
 
         local eggs = findAllEggs()
 
+        if #eggs > 0 then
+            idleStartTime = tick()
+        end
+
         if #eggs == 0 then
             -- No eggs found — try clovers if enabled
             if Config.COLLECT_CLOVERS then
@@ -3049,10 +3059,24 @@ local function startFarming()
                         end
                     end
                 else
+                    if tick() - idleStartTime >= 60 then
+                        task.spawn(function()
+                            if State.FarmThread then pcall(function() task.cancel(State.FarmThread) end) end
+                            State.FarmThread = task.spawn(startFarming)
+                        end)
+                        return
+                    end
                     setStatus("No eggs/clovers", Color3.fromRGB(255, 180, 0))
                     task.wait(Config.SEARCH_INTERVAL)
                 end
             else
+                if tick() - idleStartTime >= 60 then
+                    task.spawn(function()
+                        if State.FarmThread then pcall(function() task.cancel(State.FarmThread) end) end
+                        State.FarmThread = task.spawn(startFarming)
+                    end)
+                    return
+                end
                 setStatus("Scanning...", Color3.fromRGB(255, 180, 0))
                 task.wait(Config.SEARCH_INTERVAL)
             end

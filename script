@@ -246,6 +246,7 @@ local function findClovers()
 
     for _, model in ipairs(mapFolder:GetChildren()) do
         if not model:IsA("Model") then continue end
+        if ignoredEggs[model] then continue end
 
         -- Look for model.effect.luckyeffect
         local effectFolder = model:FindFirstChild("effect")
@@ -277,6 +278,7 @@ local function findClovers()
 
         -- Find proximity prompt
         local prompt = model:FindFirstChildWhichIsA("ProximityPrompt", true)
+        if not prompt or not prompt.Enabled then continue end
 
         table.insert(clovers, {
             instance = model,
@@ -2507,8 +2509,14 @@ local function moveToEgg(egg)
         return false
     end
 
-    local eggNum = egg.name:match("(%d+)$") or "?"
-    setStatus("→ Egg #" .. eggNum, Color3.fromRGB(0, 220, 140))
+    if egg.isRare then
+        setStatus("→ Rare: " .. egg.name, Color3.fromRGB(255, 215, 0))
+    elseif egg.name == "Clover" then
+        setStatus("→ Clover", Color3.fromRGB(0, 200, 100))
+    else
+        local eggNum = egg.name:match("(%d+)$") or "?"
+        setStatus("→ Egg #" .. eggNum, Color3.fromRGB(0, 220, 140))
+    end
 
     if Config.WALK_SPEED_BOOST > 0 and humanoid then
         humanoid.WalkSpeed = Config.WALK_SPEED_BOOST
@@ -2570,8 +2578,17 @@ local function moveToEgg(egg)
 
     local lastPos = rootPart.Position
     local timeStuck = 0
+    local moveStartTime = tick()
 
     while Config.Enabled and not isCompleted do
+        if tick() - moveStartTime > 20 then
+            setStatus("Timeout!", Color3.fromRGB(255, 80, 80))
+            if State.currentEggInstance then
+                ignoredEggs[State.currentEggInstance] = true
+            end
+            break
+        end
+
         if not egg.part or not egg.part.Parent then
             setStatus("Egg gone: #" .. eggNum, Color3.fromRGB(255, 180, 0))
             break

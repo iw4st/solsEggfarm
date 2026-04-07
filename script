@@ -132,9 +132,27 @@ end)
 local EXCLUDED_ZONES = {
     { center = Vector3.new(55.676, 102.85, -594.476), radius = 100 },
     { center = Vector3.new(-50.29, 95.5, -102.54), radius = 80 },
-    { center = Vector3.new(16.326, 93.75, -438.988), radius = 40 },
-    { center = Vector3.new(235.3, 95.8, -622.64), radius = 60 },
+    { center = Vector3.new(16.326, 93.75, -438.988), radius = 20 },
+    { center = Vector3.new(235.3, 95.8, -622.64), radius = 40 },
+    { cframe = CFrame.new(120.687668, 108.350014, -395.919312, 1, -0, 0, 0, 1, -0, 0, 0, 1), size = Vector3.new(25, 15, 25) },
 }
+
+local function isPositionExcluded(pos)
+    for _, zone in ipairs(EXCLUDED_ZONES) do
+        if zone.radius and zone.center then
+            if (pos - zone.center).Magnitude <= zone.radius then
+                return true
+            end
+        elseif zone.cframe and zone.size then
+            local localPos = zone.cframe:PointToObjectSpace(pos)
+            local halfSize = zone.size / 2
+            if math.abs(localPos.X) <= halfSize.X and math.abs(localPos.Y) <= halfSize.Y and math.abs(localPos.Z) <= halfSize.Z then
+                return true
+            end
+        end
+    end
+    return false
+end
 
 ---------------------------------------
 -- EGG PATTERNS
@@ -211,14 +229,7 @@ local function findAllEggs()
                     continue
                 end
 
-                local inExcluded = false
-                for _, zone in ipairs(EXCLUDED_ZONES) do
-                    if (part.Position - zone.center).Magnitude <= zone.radius then
-                        inExcluded = true
-                        break
-                    end
-                end
-                if inExcluded then
+                if isPositionExcluded(part.Position) then
                     continue
                 end
 
@@ -256,7 +267,6 @@ local function findClovers()
 
     for _, model in ipairs(mapFolder:GetChildren()) do
         if not model:IsA("Model") then continue end
-        if ignoredEggs[model] then continue end
 
         -- Look for model.effect.luckyeffect
         local effectFolder = model:FindFirstChild("effect")
@@ -277,18 +287,10 @@ local function findClovers()
         -- Height & excluded zone check (same as eggs)
         if part.Position.Y > Config.MAX_EGG_HEIGHT then continue end
 
-        local inExcluded = false
-        for _, zone in ipairs(EXCLUDED_ZONES) do
-            if (part.Position - zone.center).Magnitude <= zone.radius then
-                inExcluded = true
-                break
-            end
-        end
-        if inExcluded then continue end
+        if isPositionExcluded(part.Position) then continue end
 
         -- Find proximity prompt
         local prompt = model:FindFirstChildWhichIsA("ProximityPrompt", true)
-        if not prompt or not prompt.Enabled then continue end
 
         table.insert(clovers, {
             instance = model,
@@ -334,6 +336,7 @@ MainBar.BackgroundColor3 = Color3.fromRGB(12, 12, 16)
 MainBar.BorderSizePixel = 0
 MainBar.ClipsDescendants = true
 MainBar.Active = true
+MainBar.ZIndex = 20
 MainBar.Parent = ScreenGui
 
 Instance.new("UICorner", MainBar).CornerRadius = UDim.new(0, 14)
@@ -602,6 +605,18 @@ spTitle.Font = Enum.Font.GothamBold
 spTitle.TextXAlignment = Enum.TextXAlignment.Left
 spTitle.ZIndex = 13
 spTitle.Parent = headerBar
+
+local versionLbl = Instance.new("TextLabel")
+versionLbl.Size = UDim2.new(0, 50, 1, 0)
+versionLbl.Position = UDim2.new(1, -95, 0, 0)
+versionLbl.BackgroundTransparency = 1
+versionLbl.Text = "v1.02"
+versionLbl.TextColor3 = Color3.fromRGB(100, 100, 130)
+versionLbl.TextSize = 11
+versionLbl.Font = Enum.Font.GothamBold
+versionLbl.TextXAlignment = Enum.TextXAlignment.Right
+versionLbl.ZIndex = 13
+versionLbl.Parent = headerBar
 
 local closeBtn = Instance.new("TextButton")
 closeBtn.Size = UDim2.new(0, 32, 0, 32)
@@ -2893,7 +2908,8 @@ local function moveToEgg(egg)
 
     conWaypoint = pathAgent.WaypointReached:Connect(function()
         local dist = distanceTo(egg.part.Position)
-        if dist <= Config.PROMPT_DISTANCE then
+        local requiredDist = (egg.name == "Clover") and 1.5 or Config.PROMPT_DISTANCE
+        if dist <= requiredDist then
             isCompleted = true
         end
         State.currentTarget = egg.name .. string.format(" (%.0f m)", dist)
@@ -2904,9 +2920,11 @@ local function moveToEgg(egg)
     local lastPos = rootPart.Position
     local timeStuck = 0
     local moveStartTime = tick()
+    local initialDist = distanceTo(egg.part.Position)
+    local maxMoveTime = math.max(30, (initialDist / 10) + 15)
 
     while Config.Enabled and not isCompleted do
-        if tick() - moveStartTime > 20 then
+        if tick() - moveStartTime > maxMoveTime then
             setStatus("Timeout!", Color3.fromRGB(255, 80, 80))
             if State.currentEggInstance then
                 ignoredEggs[State.currentEggInstance] = true
@@ -2915,12 +2933,14 @@ local function moveToEgg(egg)
         end
 
         if not egg.part or not egg.part.Parent then
-            setStatus("Egg gone: #" .. eggNum, Color3.fromRGB(255, 180, 0))
+            local displayNum = egg.name and egg.name:match("(%d+)$") or "?"
+            setStatus("Egg / Clover gone: " .. displayNum, Color3.fromRGB(255, 180, 0))
             break
         end
 
         local dist = distanceTo(egg.part.Position)
-        if dist <= Config.PROMPT_DISTANCE then
+        local requiredDist = (egg.name == "Clover") and 1.5 or Config.PROMPT_DISTANCE
+        if dist <= requiredDist then
             isCompleted = true
             break
         end
@@ -2957,7 +2977,12 @@ local function moveToEgg(egg)
 
     if not Config.Enabled then return false end
 
-    if isCompleted or (egg.part and egg.part.Parent and distanceTo(egg.part.Position) <= Config.PROMPT_DISTANCE) then
+    local requiredDistFinal = (egg.name == "Clover") and 2.5 or Config.PROMPT_DISTANCE
+    if isCompleted or (egg.part and egg.part.Parent and distanceTo(egg.part.Position) <= requiredDistFinal) then
+        if egg.name == "Clover" and humanoid then
+            humanoid:MoveTo(egg.part.Position)
+            task.wait(0.2)
+        end
         collectEgg(egg)
         return true
     end

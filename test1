@@ -249,10 +249,12 @@ local function findAllEggs()
 
                 -- Skip already-collected eggs (mesh becomes transparent after collection)
                 local alreadyCollected = false
-                for _, desc in ipairs(obj:GetDescendants()) do
-                    if (desc:IsA("MeshPart") or desc:IsA("BasePart") or desc:IsA("SpecialMesh")) and desc.Transparency and desc.Transparency > 0 then
-                        alreadyCollected = true
-                        break
+                if not string.match(obj.Name, "^random_potion_egg_%d+$") then
+                    for _, desc in ipairs(obj:GetDescendants()) do
+                        if (desc:IsA("MeshPart") or desc:IsA("BasePart") or desc:IsA("SpecialMesh")) and desc.Transparency and desc.Transparency > 0 then
+                            alreadyCollected = true
+                            break
+                        end
                     end
                 end
                 if alreadyCollected then continue end
@@ -2810,7 +2812,7 @@ local function sendWebhook(eggName)
 
     local isClover = (eggName == "Clover")
     local isPotion = string.match(eggName, "potion") ~= nil
-    local titleText = isClover and "🍀 Clover Collected!" or "🥚 Egg Collected!"
+    local titleText = isClover and "🍀 Clover Collected!" or (isPotion and "🧪 Potion Egg Collected!" or "🥚 Egg Collected!")
     local embedColor = isClover and 65280 or (isPotion and 10181046 or 14925732) -- Green for clover, Purple for potion, Beige for regular egg
 
     local embedFields = {}

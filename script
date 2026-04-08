@@ -147,6 +147,7 @@ local EXCLUDED_ZONES = {
     { cframe = CFrame.new(221.343155, 96.5700226, -609.875244, 0, 0, 1, 0, 1, -0, -1, 0, 0), size = Vector3.new(20, 20, 20) },
     { cframe = CFrame.new(155.315994, 97.8000336, -689.891968, 1, 0, 0, 0, 1, 0, 0, 0, 1), size = Vector3.new(20, 20, 20) },
     { cframe = CFrame.new(630.699951, 99.7500458, -102.714005, 1, 0, 0, 0, 1, 0, 0, 0, 1), size = Vector3.new(10, 10, 10) },
+    { cframe = CFrame.new(116.350006, 105.799973, -681.98999, 1, 0, 0, 0, 1, 0, 0, 0, 1), size = Vector3.new(10, 10, 10) },
 }
 
 local function isPositionExcluded(pos)
@@ -1829,6 +1830,41 @@ local function toggleGameInventory()
     return false
 end
 
+local function closeGameInventory()
+    local pg = Player:FindFirstChild("PlayerGui")
+    if not pg then return false end
+    local mi = pg:FindFirstChild("MainInterface")
+    if not mi then return false end
+
+    local targetBtn = nil
+    for _, desc in ipairs(mi:GetDescendants()) do
+        if desc:IsA("ImageLabel") and (desc.Image == "http://www.roblox.com/asset/?id=6031094678" or desc.Image == "rbxassetid://6031094678") then
+            if desc.Parent and (desc.Parent:IsA("ImageButton") or desc.Parent:IsA("TextButton")) then
+                targetBtn = desc.Parent
+                break
+            end
+        end
+    end
+
+    if targetBtn then
+        pcall(function()
+            GuiService.SelectedObject = targetBtn
+            task.wait(0.05)
+            if VirtualInputManager then
+                VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Return, false, game)
+                task.wait(0.05)
+                VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Return, false, game)
+            end
+            task.wait(0.1)
+            GuiService.SelectedObject = nil
+        end)
+        task.wait(0.3)
+        return true
+    end
+
+    return toggleGameInventory()
+end
+
 local function useGameItem(itemName)
     local pg = Player:FindFirstChild("PlayerGui")
     if not pg then return false, "PlayerGui not found" end
@@ -1910,7 +1946,7 @@ local function useGameItem(itemName)
     end
 
     if not gridFrame then
-        if not wasOpen then toggleGameInventory() end
+        if not wasOpen then closeGameInventory() end
         return false, "Item grid not found"
     end
 
@@ -1936,7 +1972,7 @@ local function useGameItem(itemName)
     end
 
     if not itemFrame then
-        if not wasOpen then toggleGameInventory() end
+        if not wasOpen then closeGameInventory() end
         return false, "Item '" .. itemName .. "' not found."
     end
 
@@ -1945,7 +1981,7 @@ local function useGameItem(itemName)
         if itemFrame:IsA("TextButton") or itemFrame:IsA("ImageButton") then
             itemBtn = itemFrame
         else
-            if not wasOpen then toggleGameInventory() end
+            if not wasOpen then closeGameInventory() end
             return false, "No clickable button in item frame"
         end
     end
@@ -1970,7 +2006,7 @@ local function useGameItem(itemName)
     end
 
     if not useBtn or not useBtn.Visible then
-        if not wasOpen then toggleGameInventory() end
+        if not wasOpen then closeGameInventory() end
         return false, "Use button hidden/missing"
     end
 
@@ -1978,7 +2014,7 @@ local function useGameItem(itemName)
     task.wait(0.3)
 
     if not wasOpen then
-        toggleGameInventory()
+        closeGameInventory()
     end
 
     return true, "Successfully used " .. itemName

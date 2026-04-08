@@ -624,7 +624,7 @@ local versionLbl = Instance.new("TextLabel")
 versionLbl.Size = UDim2.new(0, 50, 1, 0)
 versionLbl.Position = UDim2.new(1, -95, 0, 0)
 versionLbl.BackgroundTransparency = 1
-versionLbl.Text = "v1.11" -- CHANGE IT ALWAYS AFTER UPDATING SCRIPT +0.01 (dont remove this comment)
+versionLbl.Text = "v1.12" -- CHANGE IT ALWAYS AFTER UPDATING SCRIPT +0.01 (dont remove this comment)
 versionLbl.TextColor3 = Color3.fromRGB(100, 100, 130)
 versionLbl.TextSize = 11
 versionLbl.Font = Enum.Font.GothamBold
@@ -2585,14 +2585,20 @@ table.insert(State.Connections, rareEggAddedConn)
 
 local lastWeather = ""
 
+-- Normalize biome text: strip spaces so "sand storm" -> "sandstorm", etc.
+local function normalizeBiomeName(text)
+    return string.gsub(string.lower(text), "%s+", "")
+end
+
 local function isValidBiome(name)
     local lower = string.lower(name)
     if lower == "none" or lower == "tip" or lower == "system" then return false end
     -- Reject egg-related labels (e.g. "GLITCHED EGG", "HATCH EGG", "ROYAL EGG") but allow "eggland"
     if string.find(lower, "%segg") or (lower == "egg") then return false end
     if lower == "normal" then return true end
+    local normalized = normalizeBiomeName(name)
     for k, v in pairs(WEATHER_COLORS) do
-        if string.find(lower, k) then return true end
+        if string.find(normalized, k) then return true end
     end
     return false
 end
@@ -2610,12 +2616,14 @@ local function updateWeatherStatus(rawText)
         local biomeName = text
         local color = WEATHER_COLORS.normal
         local ping = ""
+        -- Normalize: strip spaces for lookup ("sand storm" -> "sandstorm")
+        local normalized = normalizeBiomeName(rawText)
 
         if isGlitched then
             biomeName = "glitched"
         else
             for k, v in pairs(WEATHER_COLORS) do
-                if string.find(text, k) then
+                if string.find(normalized, k) then
                     biomeName = k
                     color = v
                     break
@@ -2670,10 +2678,15 @@ local function checkWeatherMessage(text)
     if not text or typeof(text) ~= "string" then return end
     local cleanText = stripRichText(text)
     
-    local biomeMatch = string.match(cleanText, "^%[([%a]+)%]%:")
-    if biomeMatch and isValidBiome(biomeMatch) then
-        local rawText = "[ " .. string.upper(biomeMatch) .. " ]"
-        updateWeatherStatus(rawText)
+    -- Match biome names including multi-word ones like "SAND STORM"
+    local biomeMatch = string.match(cleanText, "^%[([%a%s]+)%]%:")
+    if biomeMatch then
+        -- Trim trailing spaces
+        biomeMatch = string.gsub(biomeMatch, "%s+$", "")
+        if isValidBiome(biomeMatch) then
+            local rawText = "[ " .. string.upper(biomeMatch) .. " ]"
+            updateWeatherStatus(rawText)
+        end
     end
 end
 
@@ -3328,4 +3341,3 @@ if Config.Enabled then
 end
 
 warn("[SolsFarm] V3 Settings Script fully loaded and successfully started!")
- 

@@ -2760,11 +2760,12 @@ local function sendWebhook(eggName)
     end)
 
     local isClover = (eggName == "Clover")
+    local isPotion = string.match(eggName, "potion") ~= nil
     local titleText = isClover and "🍀 Clover Collected!" or "🥚 Egg Collected!"
-    local embedColor = isClover and 65280 or 14925732 -- Green for clover, Beige for egg
+    local embedColor = isClover and 65280 or (isPotion and 10181046 or 14925732) -- Green for clover, Purple for potion, Beige for regular egg
 
     local embedFields = {}
-    if not isClover then
+    if not isClover and not isPotion then
         table.insert(embedFields, {["name"] = "💎 Points Gained", ["value"] = tostring(pointsGained), ["inline"] = true})
     end
     table.insert(embedFields, {["name"] = "💰 Total Points", ["value"] = curPoints, ["inline"] = true})

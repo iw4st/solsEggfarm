@@ -245,6 +245,16 @@ local function findAllEggs()
                     continue
                 end
 
+                -- Skip already-collected eggs (mesh becomes transparent after collection)
+                local alreadyCollected = false
+                for _, desc in ipairs(obj:GetDescendants()) do
+                    if (desc:IsA("MeshPart") or desc:IsA("BasePart") or desc:IsA("SpecialMesh")) and desc.Transparency and desc.Transparency > 0 then
+                        alreadyCollected = true
+                        break
+                    end
+                end
+                if alreadyCollected then continue end
+
                 local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
                 table.insert(eggs, {
                     instance = obj,
@@ -2296,10 +2306,10 @@ local function checkMerchantMessage(text)
     
     local dupeKey = merchantName or cleanText
     
-    -- Prevent duplicate notifications
-    if recentlyNotifiedMerchants[dupeKey] then return end
-    recentlyNotifiedMerchants[dupeKey] = true
-    task.delay(300, function() recentlyNotifiedMerchants[dupeKey] = nil end)
+    -- Prevent duplicate notifications (tick-based, immune to concurrent handlers)
+    local now = tick()
+    if recentlyNotifiedMerchants[dupeKey] and (now - recentlyNotifiedMerchants[dupeKey]) < 30 then return end
+    recentlyNotifiedMerchants[dupeKey] = now
     
     if merchantName then
         sendGenericWebhook(
@@ -2527,18 +2537,8 @@ local function scanForRareEggs()
         if rareName then
             detectedRareEggs[obj] = true
 
-            if not recentlyNotifiedEggs["explorer_" .. rareName] then
-                recentlyNotifiedEggs["explorer_" .. rareName] = true
-                sendGenericWebhook(
-                    Config.WEBHOOK_RARE_EGGS,
-                    "RARE EGG FOUND IN MAP!",
-                    "Script detected a rare egg: **" .. rareName .. "**\nNavigating to collect it!",
-                    getRareEggColor(rareName),
-                    getPingText(),
-                    buildRarityFields(rareName)
-                )
-                task.delay(120, function() recentlyNotifiedEggs["explorer_" .. rareName] = nil end)
-            end
+            -- Mark as detected (webhook is sent from chat handler only)
+            recentlyNotifiedEggs["explorer_" .. rareName] = true
 
             local entry = buildRareEggEntry(obj, rareName)
             if entry then
@@ -2561,18 +2561,8 @@ local rareEggAddedConn = Workspace.DescendantAdded:Connect(function(obj)
         if rareName then
             detectedRareEggs[obj] = true
 
-            if not recentlyNotifiedEggs["explorer_" .. rareName] then
-                recentlyNotifiedEggs["explorer_" .. rareName] = true
-                sendGenericWebhook(
-                    Config.WEBHOOK_RARE_EGGS,
-                    "✨ RARE EGG JUST SPAWNED!",
-                    "A rare egg just appeared: **" .. rareName .. "**\nScript is collecting it!",
-                    getRareEggColor(rareName),
-                    "<@1289915272731295787>",
-                    buildRarityFields(rareName)
-                )
-                task.delay(120, function() recentlyNotifiedEggs["explorer_" .. rareName] = nil end)
-            end
+            -- Mark as detected (webhook is sent from chat handler only)
+            recentlyNotifiedEggs["explorer_" .. rareName] = true
 
             local entry = buildRareEggEntry(obj, rareName)
             if entry then
@@ -2790,12 +2780,15 @@ local function autoEquipAbyssal()
 
     local function cleverClick(target)
         pcall(function()
-            GuiService.SelectedObject = target
-            task.wait()
-            VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Return, false, game)
-            task.wait()
-            VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Return, false, game)
-            GuiService.SelectedObject = nil
+            -- Only set SelectedObject if target is a valid, visible GuiButton
+            if target and target:IsA("GuiButton") and target.Visible and target.AbsoluteSize.X > 0 and target.AbsoluteSize.Y > 0 then
+                GuiService.SelectedObject = target
+                task.wait()
+                VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Return, false, game)
+                task.wait()
+                VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Return, false, game)
+                GuiService.SelectedObject = nil
+            end
         end)
 
         pcall(function()
@@ -2849,14 +2842,66 @@ local function autoEquipAbyssal()
     task.wait(0.2)
 
     local auraClicked = false
-    for _, obj in ipairs(PlayerGui:GetDescendants()) do
-        if (obj:IsA("TextLabel") or obj:IsA("TextButton")) and string.match(string.lower(obj.Text), "abyssal") then
-            if obj.AbsoluteSize.X > 0 and obj.AbsoluteSize.Y > 0 then
-                local btn = obj:FindFirstAncestorWhichIsA("GuiButton")
-                if btn then
-                    cleverClick(btn)
-                    auraClicked = true
-                    break
+
+    -- Navigate to the ScrollingFrame that holds all aura entries
+    local scrollingFrame = nil
+    pcall(function()
+        local mi = PlayerGui:FindFirstChild("MainInterface")
+        if mi then
+            -- Path: MainInterface.Frame.Frame.Frame.ScrollingFrame
+            -- Use GetDescendants to find the ScrollingFrame inside the inventory panel
+            for _, desc in ipairs(mi:GetDescendants()) do
+                if desc:IsA("ScrollingFrame") and desc.Parent and desc.Parent:IsA("Frame") then
+                    -- Verify this is the aura inventory ScrollingFrame by checking it has children with TextButton class
+                    local hasAuraEntries = false
+                    for _, child in ipairs(desc:GetChildren()) do
+                        if child:IsA("TextButton") then
+                            hasAuraEntries = true
+                            break
+                        end
+                    end
+                    if hasAuraEntries then
+                        scrollingFrame = desc
+                        break
+                    end
+                end
+            end
+        end
+    end)
+
+    if scrollingFrame then
+        -- Iterate through ScrollingFrame children (each is a TextButton with a random numeric ID)
+        for _, entry in ipairs(scrollingFrame:GetChildren()) do
+            if entry:IsA("TextButton") then
+                -- Check all descendant TextLabels for "Abyssal Hunter" text
+                for _, label in ipairs(entry:GetDescendants()) do
+                    if label:IsA("TextLabel") then
+                        local labelText = string.gsub(label.Text, "%s+", " ")
+                        labelText = string.gsub(labelText, "^%s+", "")
+                        labelText = string.gsub(labelText, "%s+$", "")
+                        if string.lower(labelText) == "abyssal hunter" then
+                            cleverClick(entry)
+                            auraClicked = true
+                            break
+                        end
+                    end
+                end
+                if auraClicked then break end
+            end
+        end
+    end
+
+    -- Fallback: scan all descendants if ScrollingFrame approach didn't work
+    if not auraClicked then
+        for _, obj in ipairs(PlayerGui:GetDescendants()) do
+            if (obj:IsA("TextLabel") or obj:IsA("TextButton")) and string.match(string.lower(obj.Text), "abyssal") then
+                if obj.AbsoluteSize.X > 0 and obj.AbsoluteSize.Y > 0 then
+                    local btn = obj:FindFirstAncestorWhichIsA("GuiButton")
+                    if btn then
+                        cleverClick(btn)
+                        auraClicked = true
+                        break
+                    end
                 end
             end
         end
@@ -2868,17 +2913,43 @@ local function autoEquipAbyssal()
         return
     end
 
-    task.wait(0.1)
+    -- Wait a bit for the panel to update
+    task.wait(0.2)
+    
+    -- Find ALL Equip buttons. The Storage Upgrade button inexplicably contains "Equip" text internally
+    -- and gets found first in normal iteration. We sort by geometric Y position to guarantee we 
+    -- pick the real Equip button (which is always physically above Storage Upgrade).
+    local possibleEquips = {}
+    pcall(function()
+        local mi = PlayerGui:FindFirstChild("MainInterface")
+        if not mi then return end
 
-    local equipBtn = nil
-    for _, obj in ipairs(PlayerGui:GetDescendants()) do
-        if obj:IsA("ImageButton") then
-            local path = obj:GetFullName()
-            if string.find(path, "MainInterface%.Frame%.Frame%.Frame%.Frame%.ImageButton%.ImageButton$") then
-                equipBtn = obj
-                break
+        for _, desc in ipairs(mi:GetDescendants()) do
+            if desc:IsA("ImageButton") and desc.Visible and desc.AbsoluteSize.X > 0 then
+                for _, child in ipairs(desc:GetChildren()) do
+                    if child:IsA("TextLabel") then
+                        local content = ""
+                        pcall(function() content = child.ContentText end)
+                        if content == "" then content = child.Text or "" end
+                        content = string.match(content, "^%s*(.-)%s*$") or ""
+
+                        if string.lower(content) == "equip" then
+                            table.insert(possibleEquips, desc)
+                            break
+                        end
+                    end
+                end
             end
         end
+    end)
+
+    local equipBtn = nil
+    if #possibleEquips > 0 then
+        -- Math sort: smallest Y means highest on the screen
+        table.sort(possibleEquips, function(a, b)
+            return a.AbsolutePosition.Y < b.AbsolutePosition.Y
+        end)
+        equipBtn = possibleEquips[1]
     end
 
     if equipBtn then
@@ -2886,36 +2957,97 @@ local function autoEquipAbyssal()
         setStatus("Aura equipped!", Color3.fromRGB(0, 220, 140))
     else
         setStatus("Equip btn not found", Color3.fromRGB(255, 80, 80))
+        warn("[AbyssalEquip] equipBtn is nil, could not equip")
     end
 
-    toggleInventory()
+    task.wait(0.2)
+
+    -- Close inventory panel via MainInterface.Frame.TextLabel.ImageButton
+    pcall(function()
+        local mi = PlayerGui:FindFirstChild("MainInterface")
+        if mi then
+            -- Find the top-level Frame in MainInterface (the inventory panel)
+            for _, frame in ipairs(mi:GetChildren()) do
+                if frame:IsA("Frame") then
+                    -- Look for TextLabel.ImageButton (close button)
+                    local titleLabel = frame:FindFirstChildWhichIsA("TextLabel")
+                    if titleLabel then
+                        local closeBtn = titleLabel:FindFirstChildWhichIsA("ImageButton")
+                        if closeBtn then
+                            cleverClick(closeBtn)
+                            break
+                        end
+                    end
+                end
+            end
+        end
+    end)
 end
 
 ---------------------------------------
 -- EGG COLLECTION
 ---------------------------------------
+local function isEggCollected(eggInstance)
+    if not eggInstance or not eggInstance.Parent then return true end -- gone = collected
+    for _, desc in ipairs(eggInstance:GetDescendants()) do
+        if desc:IsA("MeshPart") or desc:IsA("SpecialMesh") or desc:IsA("BasePart") then
+            if desc.Transparency and desc.Transparency > 0 then
+                return true
+            end
+        end
+    end
+    return false
+end
+
 local function collectEgg(egg)
     local prompt = egg.prompt or egg.instance:FindFirstChildWhichIsA("ProximityPrompt", true)
-    if prompt then
-        fireProximityPromptSafe(prompt)
-        task.wait(0.5)
-    else
-        if VirtualInputManager then
-            VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.E, false, game)
-            task.wait(0.2)
-            VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.E, false, game)
-        end
-        task.wait(0.5)
-    end
-    State.EggsVisited = State.EggsVisited + 1
-    updateEggCount()
+    local collected = false
+    local maxAttempts = 3
 
-    task.spawn(function()
-        sendWebhook(egg.name)
-    end)
-    
-    if humanoid and humanoid.Health > 0 then
-        humanoid.Health = 0
+    for attempt = 1, maxAttempts do
+        if prompt then
+            fireProximityPromptSafe(prompt)
+        else
+            if VirtualInputManager then
+                VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.E, false, game)
+                task.wait(0.2)
+                VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+            end
+        end
+
+        task.wait(0.1)
+
+        -- Verify collection by checking mesh transparency
+        if isEggCollected(egg.instance) then
+            collected = true
+            break
+        end
+
+        -- Not collected yet, wait a bit and retry
+        if attempt < maxAttempts then
+            setStatus("Retry collect #" .. attempt, Color3.fromRGB(255, 180, 0))
+            task.wait(0.3)
+        end
+    end
+
+    if collected then
+        State.EggsVisited = State.EggsVisited + 1
+        updateEggCount()
+
+        task.spawn(function()
+            sendWebhook(egg.name)
+        end)
+
+        if humanoid and humanoid.Health > 0 then
+            humanoid.Health = 0
+        end
+    else
+        setStatus("Egg not collected!", Color3.fromRGB(255, 80, 80))
+        -- Still reset to avoid getting stuck
+        task.wait(0.5)
+        if humanoid and humanoid.Health > 0 then
+            humanoid.Health = 0
+        end
     end
 end
 

@@ -645,7 +645,7 @@ local versionLbl = Instance.new("TextLabel")
 versionLbl.Size = UDim2.new(0, 50, 1, 0)
 versionLbl.Position = UDim2.new(1, -95, 0, 0)
 versionLbl.BackgroundTransparency = 1
-versionLbl.Text = "v1.07" -- CHANGE IT ALWAYS AFTER UPDATING SCRIPT +0.01 (dont remove this comment)
+versionLbl.Text = "v1.09" -- CHANGE IT ALWAYS AFTER UPDATING SCRIPT +0.01 (dont remove this comment)
 versionLbl.TextColor3 = Color3.fromRGB(100, 100, 130)
 versionLbl.TextSize = 11
 versionLbl.Font = Enum.Font.GothamBold
@@ -2606,6 +2606,16 @@ table.insert(State.Connections, rareEggAddedConn)
 
 local lastWeather = ""
 
+local function isValidBiome(name)
+    local lower = string.lower(name)
+    if lower == "none" or lower == "tip" or lower == "system" then return false end
+    if lower == "normal" then return true end
+    for k, v in pairs(WEATHER_COLORS) do
+        if string.find(lower, k) then return true end
+    end
+    return false
+end
+
 local function updateWeatherStatus(rawText)
     local text = string.lower(rawText)
     if text ~= lastWeather and rawText ~= "" and text ~= "label" then
@@ -2638,6 +2648,9 @@ local function updateWeatherStatus(rawText)
             ping = Config.WEBHOOK_PING_ID and getPingText() or ""
         end
 
+        -- Make it clean
+        if string.find(biomeName, "none") then return end
+
         sendGenericWebhook(Config.WEBHOOK_WEATHER, "🌦 Weather Changed!", "Biome: **" .. rawText .. "**", color, ping)
     end
 end
@@ -2649,11 +2662,14 @@ local function checkWeather()
         for _, obj in ipairs(mi:GetDescendants()) do
             if obj:IsA("TextLabel") then
                 local txt = obj.Text
-                -- Avoid reading the version text (like v4.763)
                 if txt and txt ~= "" and txt ~= "Label" and not string.match(txt, "^v%d+%.%d+") then
-                    -- Look for something enclosed in brackets, e.g. [ HELL ]
-                    if string.match(txt, "^%[%s*(.-)%s*%]$") then
+                    local inner = string.match(txt, "^%[%s*(.-)%s*%]$")
+                    if inner and isValidBiome(inner) then
                         rawText = txt
+                        break
+                    -- Secondary check using ZIndex 2 as user suggested, for edge cases without brackets
+                    elseif (obj.ZIndex == 2 or obj.ZIndex == 3) and isValidBiome(txt) and not string.find(string.lower(txt), "none") then
+                        if not inner then rawText = "[ " .. string.upper(txt) .. " ]" end
                         break
                     end
                 end
@@ -2670,9 +2686,8 @@ local function checkWeatherMessage(text)
     if not text or typeof(text) ~= "string" then return end
     local cleanText = stripRichText(text)
     
-    -- Usually: "[Snowy]: White snow and cold..."
     local biomeMatch = string.match(cleanText, "^%[([%a]+)%]%:")
-    if biomeMatch then
+    if biomeMatch and isValidBiome(biomeMatch) then
         local rawText = "[ " .. string.upper(biomeMatch) .. " ]"
         updateWeatherStatus(rawText)
     end
@@ -3086,8 +3101,6 @@ local function startFarming()
     local lastAfkJumpTime = tick()
 
     while Config.Enabled do
-        checkWeather()
-
         local hum = getHumanoid()
         if not hum or hum.Health <= 0 then
             setStatus("Waiting respawn...", Color3.fromRGB(255, 180, 0))
@@ -3308,6 +3321,13 @@ end)
 ---------------------------------------
 updateEggCount()
 animateToggle(Config.Enabled)
+
+task.spawn(function()
+    while true do
+        pcall(checkWeather)
+        task.wait(1)
+    end
+end)
 
 local VirtualUser = game:GetService("VirtualUser")
 Player.Idled:Connect(function()

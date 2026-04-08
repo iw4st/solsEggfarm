@@ -146,6 +146,7 @@ local EXCLUDED_ZONES = {
     { cframe = CFrame.new(202.722015, 103.999969, -660.192017, 1, 0, 0, 0, 1, 0, 0, 0, 1), size = Vector3.new(10, 10, 10) },
     { cframe = CFrame.new(221.343155, 96.5700226, -609.875244, 0, 0, 1, 0, 1, -0, -1, 0, 0), size = Vector3.new(20, 20, 20) },
     { cframe = CFrame.new(155.315994, 97.8000336, -689.891968, 1, 0, 0, 0, 1, 0, 0, 0, 1), size = Vector3.new(20, 20, 20) },
+    { cframe = CFrame.new(630.699951, 99.7500458, -102.714005, 1, 0, 0, 0, 1, 0, 0, 0, 1), size = Vector3.new(10, 10, 10) },
 }
 
 local function isPositionExcluded(pos)
@@ -2758,16 +2759,23 @@ local function sendWebhook(eggName)
         end
     end)
 
+    local isClover = (eggName == "Clover")
+    local titleText = isClover and "🍀 Clover Collected!" or "🥚 Egg Collected!"
+    local embedColor = isClover and 65280 or 14925732 -- Green for clover, Beige for egg
+
+    local embedFields = {}
+    if not isClover then
+        table.insert(embedFields, {["name"] = "💎 Points Gained", ["value"] = tostring(pointsGained), ["inline"] = true})
+    end
+    table.insert(embedFields, {["name"] = "💰 Total Points", ["value"] = curPoints, ["inline"] = true})
+
     sendGenericWebhook(
         Config.WEBHOOK_URL,
-        "🥚 Egg Collected!",
+        titleText,
         "Collected **" .. eggName .. "**",
-        65280,
+        embedColor,
         "",
-        {
-            {["name"] = "💎 Points Gained", ["value"] = tostring(pointsGained), ["inline"] = true},
-            {["name"] = "💰 Total Points", ["value"] = curPoints, ["inline"] = true}
-        }
+        embedFields
     )
 end
 
@@ -2986,16 +2994,41 @@ end
 
 ---------------------------------------
 -- EGG COLLECTION
----------------------------------------
 local function isEggCollected(eggInstance)
     if not eggInstance or not eggInstance.Parent then return true end -- gone = collected
-    for _, desc in ipairs(eggInstance:GetDescendants()) do
-        if desc:IsA("MeshPart") or desc:IsA("SpecialMesh") or desc:IsA("BasePart") then
-            if desc.Transparency and desc.Transparency > 0 then
+    
+    local nameLower = string.lower(eggInstance.Name)
+    local isClover = string.find(nameLower, "clover") or (eggInstance:FindFirstChild("luckyeffect", true) ~= nil)
+    
+    if not isClover then
+        -- Check if the object ITSELF is a MeshPart/BasePart and is transparent
+        if (eggInstance:IsA("MeshPart") or eggInstance:IsA("BasePart")) then
+            if eggInstance.Transparency and eggInstance.Transparency > 0.9 then
                 return true
             end
         end
+
+        -- Prompt check (disabled = collected)
+        local prompt = eggInstance:FindFirstChildWhichIsA("ProximityPrompt", true)
+        if prompt and not prompt.Enabled then 
+            return true 
+        end
+        if not prompt and eggInstance:IsA("Model") and string.find(nameLower, "egg") then
+            return true
+        end
+
+        for _, desc in ipairs(eggInstance:GetDescendants()) do
+            if desc:IsA("MeshPart") or desc:IsA("SpecialMesh") or desc:IsA("BasePart") then
+                -- Ignore purely invisible hitboxes that were always invisible
+                if desc.Name ~= "Hitbox" and desc.Name ~= "HumanoidRootPart" then
+                    if desc.Transparency and desc.Transparency > 0.9 then
+                        return true
+                    end
+                end
+            end
+        end
     end
+    
     return false
 end
 
@@ -3007,32 +3040,33 @@ local function collectEgg(egg)
     for attempt = 1, maxAttempts do
         if prompt then
             fireProximityPromptSafe(prompt)
+            collected = true
         else
             if VirtualInputManager then
                 VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.E, false, game)
                 task.wait(0.2)
                 VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.E, false, game)
+                collected = true
             end
         end
 
-        task.wait(0.1)
+        task.wait(0.3)
 
-        -- Verify collection by checking mesh transparency
-        if isEggCollected(egg.instance) then
-            collected = true
+        -- We now assume it collected successfully based on prompt activation
+        if collected then
             break
-        end
-
-        -- Not collected yet, wait a bit and retry
-        if attempt < maxAttempts then
-            setStatus("Retry collect #" .. attempt, Color3.fromRGB(255, 180, 0))
-            task.wait(0.3)
         end
     end
 
+    -- Clear current target specifically so it searches for a new one upon restart
+    State.currentEggInstance = nil
+    State.currentTarget = "None"
+
     if collected then
-        State.EggsVisited = State.EggsVisited + 1
-        updateEggCount()
+        if egg.name ~= "Clover" then
+            State.EggsVisited = State.EggsVisited + 1
+            updateEggCount()
+        end
 
         task.spawn(function()
             sendWebhook(egg.name)
@@ -3043,7 +3077,6 @@ local function collectEgg(egg)
         end
     else
         setStatus("Egg not collected!", Color3.fromRGB(255, 80, 80))
-        -- Still reset to avoid getting stuck
         task.wait(0.5)
         if humanoid and humanoid.Health > 0 then
             humanoid.Health = 0
@@ -3148,9 +3181,26 @@ local function moveToEgg(egg)
         end
 
         if not egg.part or not egg.part.Parent then
-            local displayNum = egg.name and egg.name:match("(%d+)$") or "?"
-            setStatus("Egg / Clover gone: " .. displayNum, Color3.fromRGB(255, 180, 0))
-            break
+            local distToCache = distanceTo(egg.position)
+            if distToCache <= 15 then
+                -- Target disappeared while we were close to it.
+                -- For clovers, this means we literally walked into it and collected it!
+                isCompleted = true
+                break
+            else
+                local displayNum = egg.name and egg.name:match("(%d+)$") or "?"
+                setStatus("Egg / Clover gone: " .. displayNum, Color3.fromRGB(255, 180, 0))
+                cleanup()
+                return false
+            end
+        end
+
+        -- Check if it became transparent/collected mid-walk
+        if isEggCollected(egg.instance) then
+            setStatus("Egg already transparent!", Color3.fromRGB(255, 180, 0))
+            if State.currentEggInstance then ignoredEggs[State.currentEggInstance] = true end
+            cleanup()
+            return false -- Gracefully exit without triggering "Pathfinding Failed" webhook
         end
 
         local dist = distanceTo(egg.part.Position)
@@ -3455,7 +3505,7 @@ animateToggle(Config.Enabled)
 task.spawn(function()
     while true do
         pcall(checkWeather)
-        task.wait(1)
+        task.wait(5)
     end
 end)
 

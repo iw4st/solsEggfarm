@@ -34,6 +34,8 @@ end)
 ---------------------------------------
 -- CONFIG & STATE
 ---------------------------------------
+local DEBUG_WEBHOOK = false -- Установите true чтобы включить подробное логирование действий для ВСЕХ яиц и клеверов
+
 local Config = {
     Enabled = false,
     EggReachDist = 10,
@@ -225,6 +227,51 @@ local function distanceTo(pos)
     return (rootPart.Position - pos).Magnitude
 end
 
+local trackedTargetState = setmetatable({}, {__mode = "k"})
+
+local function trackTargetAction(eggObj, action, customName)
+    if not DEBUG_WEBHOOK then return end
+    if not eggObj or not eggObj.Parent then return end
+    
+    local currentState = trackedTargetState[eggObj]
+    if currentState == action then return end
+    -- Prevent background scanner from reverting state and spamming webhooks
+    if action == "Detected" and currentState then return end
+    trackedTargetState[eggObj] = action
+
+    local displayName = customName or eggObj.Name
+    local isPotion = string.match(displayName, "potion")
+    local isClover = (displayName == "Clover") or (eggObj:FindFirstChild("effect") and eggObj.effect:FindFirstChild("luckyeffect"))
+    if isClover then displayName = "Clover" end
+    
+    local typeName = isClover and "🍀 Clover" or (isPotion and "🧪 Potion Egg" or "🥚 Egg")
+    local typeColor = isClover and 65280 or (isPotion and 10181046 or 14925732)
+
+    local emoji = "🔹"
+    if action == "Detected" then emoji = "🔍"
+    elseif action == "Moving to collect" then emoji = "🏃"
+    elseif action == "Deleted (Exclusion Zone)" then emoji = "🗑️"
+    elseif action == "Ignored (Timeout or Error)" then emoji = "🚫"
+    elseif action == "Ignored (Already collected)" then emoji = "👻"
+    elseif action == "Failed to pathfind" then emoji = "⚠️"
+    end
+
+    local pos = "Unknown"
+    local part = eggObj:IsA("BasePart") and eggObj or eggObj:FindFirstChildWhichIsA("BasePart", true)
+    if part then
+        pos = string.format("(%.0f, %.0f, %.0f)", part.Position.X, part.Position.Y, part.Position.Z)
+    end
+
+    sendGenericWebhook(
+        Config.WEBHOOK_URL,
+        emoji .. " Tracking: " .. action,
+        "**Target:** `" .. displayName .. "` (" .. typeName .. ")\n**Location:** `" .. pos .. "`\n**Action Taken:** " .. action,
+        typeColor,
+        "",
+        {}
+    )
+end
+
 local function findAllEggs()
     local eggs = {}
     for _, obj in ipairs(Workspace:GetDescendants()) do
@@ -243,20 +290,24 @@ local function findAllEggs()
                 end
 
                 if isPositionExcluded(part.Position) then
+                    trackTargetAction(obj, "Deleted (Exclusion Zone)")
                     pcall(function() obj:Destroy() end)
                     continue
                 end
 
                 -- Skip already-collected eggs (mesh becomes transparent after collection)
                 local alreadyCollected = false
-                for _, desc in ipairs(obj:GetDescendants()) do
-                    if (desc:IsA("MeshPart") or desc:IsA("BasePart") or desc:IsA("SpecialMesh")) and desc.Transparency and desc.Transparency > 0 then
-                        alreadyCollected = true
-                        break
+                if not string.match(obj.Name, "^random_potion_egg_%d+$") then
+                    for _, desc in ipairs(obj:GetDescendants()) do
+                        if (desc:IsA("MeshPart") or desc:IsA("BasePart") or desc:IsA("SpecialMesh")) and desc.Transparency and desc.Transparency > 0 then
+                            alreadyCollected = true
+                            break
+                        end
                     end
                 end
                 if alreadyCollected then continue end
 
+                trackTargetAction(obj, "Detected")
                 local prompt = obj:FindFirstChildWhichIsA("ProximityPrompt", true)
                 table.insert(eggs, {
                     instance = obj,
@@ -312,10 +363,12 @@ local function findClovers()
         if part.Position.Y > Config.MAX_EGG_HEIGHT then continue end
 
         if isPositionExcluded(part.Position) then 
+            trackTargetAction(model, "Deleted (Exclusion Zone)")
             pcall(function() model:Destroy() end)
             continue 
         end
 
+        trackTargetAction(model, "Detected")
         -- Find proximity prompt
         local prompt = model:FindFirstChildWhichIsA("ProximityPrompt", true)
 
@@ -637,7 +690,7 @@ local versionLbl = Instance.new("TextLabel")
 versionLbl.Size = UDim2.new(0, 50, 1, 0)
 versionLbl.Position = UDim2.new(1, -95, 0, 0)
 versionLbl.BackgroundTransparency = 1
-versionLbl.Text = "v1.14" -- CHANGE IT ALWAYS AFTER UPDATING SCRIPT +0.01 (dont remove this comment)
+versionLbl.Text = "v1.15" -- CHANGE IT ALWAYS AFTER UPDATING SCRIPT +0.01 (dont remove this comment)
 versionLbl.TextColor3 = Color3.fromRGB(100, 100, 130)
 versionLbl.TextSize = 11
 versionLbl.Font = Enum.Font.GothamBold
@@ -1664,7 +1717,13 @@ end
 local pathAgent = nil
 
 local function initPathAgent()
-    if pathAgent then pathAgent:Destroy() end
+    if pathAgent then
+        pcall(function() 
+            if type(pathAgent) == "table" and pathAgent.Destroy then
+                pathAgent:Destroy() 
+            end
+        end)
+    end
     if not SimplePath or not character then return end
 
     -- Using SimplePath with no custom parameters ensures that Roblox PathfindingService
@@ -2516,33 +2575,8 @@ local function identifyRareEgg(obj)
 end
 
 local function checkRareEggMessage(text)
-    if not text or typeof(text) ~= "string" then return end
-    -- Strip rich text / HTML tags before matching and sending
-    local cleanText = stripRichText(text)
-    for _, v in ipairs(RARE_EGGS) do
-        if string.find(cleanText, v[1], 1, true) then
-            if not recentlyNotifiedEggs[v[2]] then
-                recentlyNotifiedEggs[v[2]] = true
-                local info = getRareEggInfo(v[2])
-                local emoji = info and info.emoji or "🌟"
-                
-                task.spawn(function()
-                    task.wait(0.5)
-                    sendGenericWebhook(
-                        Config.WEBHOOK_RARE_EGGS,
-                        emoji .. " RARE EGG SPAWNED!",
-                        "A very rare egg: **" .. v[2] .. "** just spawned!\nMessage: `" .. cleanText .. "`",
-                        getRareEggColor(v[2]),
-                        getPingText(),
-                        buildRarityFields(v[2])
-                    )
-                end)
-                
-                task.delay(120, function() recentlyNotifiedEggs[v[2]] = nil end)
-            end
-            break
-        end
-    end
+    -- Disabled chat-based rare egg detection to prevent inaccurate "Hatch / Royal" notifications.
+    -- We now rely entirely on the exact Workspace scanner (scanForRareEggs / rareEggAddedConn).
 end
 
 ---------------------------------------
@@ -2587,8 +2621,20 @@ local function scanForRareEggs()
         if rareName then
             detectedRareEggs[obj] = true
 
-            -- Mark as detected (webhook is sent from chat handler only)
-            recentlyNotifiedEggs["explorer_" .. rareName] = true
+            if not recentlyNotifiedEggs["explorer_" .. rareName] then
+                recentlyNotifiedEggs["explorer_" .. rareName] = true
+                
+                local emoji = getRareEggInfo(rareName) and getRareEggInfo(rareName).emoji or "✨"
+                sendGenericWebhook(
+                    Config.WEBHOOK_RARE_EGGS,
+                    emoji .. " RARE EGG FOUND IN MAP!",
+                    "Script detected a rare egg: **" .. rareName .. "**\nNavigating to collect it!",
+                    getRareEggColor(rareName),
+                    getPingText(),
+                    buildRarityFields(rareName)
+                )
+                task.delay(120, function() recentlyNotifiedEggs["explorer_" .. rareName] = nil end)
+            end
 
             local entry = buildRareEggEntry(obj, rareName)
             if entry then
@@ -2599,7 +2645,6 @@ local function scanForRareEggs()
     end
 end
 
--- Also listen for new objects appearing (rare eggs spawning in real-time)
 local rareEggAddedConn = Workspace.DescendantAdded:Connect(function(obj)
     task.delay(0.5, function()  -- small delay so children (prompts, labels) load
         if not obj or not obj.Parent then return end
@@ -2611,8 +2656,20 @@ local rareEggAddedConn = Workspace.DescendantAdded:Connect(function(obj)
         if rareName then
             detectedRareEggs[obj] = true
 
-            -- Mark as detected (webhook is sent from chat handler only)
-            recentlyNotifiedEggs["explorer_" .. rareName] = true
+            if not recentlyNotifiedEggs["explorer_" .. rareName] then
+                recentlyNotifiedEggs["explorer_" .. rareName] = true
+                
+                local emoji = getRareEggInfo(rareName) and getRareEggInfo(rareName).emoji or "✨"
+                sendGenericWebhook(
+                    Config.WEBHOOK_RARE_EGGS,
+                    emoji .. " RARE EGG JUST SPAWNED!",
+                    "A rare egg just appeared: **" .. rareName .. "**\nScript is collecting it!",
+                    getRareEggColor(rareName),
+                    getPingText(),
+                    buildRarityFields(rareName)
+                )
+                task.delay(120, function() recentlyNotifiedEggs["explorer_" .. rareName] = nil end)
+            end
 
             local entry = buildRareEggEntry(obj, rareName)
             if entry then
@@ -2810,7 +2867,7 @@ local function sendWebhook(eggName)
 
     local isClover = (eggName == "Clover")
     local isPotion = string.match(eggName, "potion") ~= nil
-    local titleText = isClover and "🍀 Clover Collected!" or "🥚 Egg Collected!"
+    local titleText = isClover and "🍀 Clover Collected!" or (isPotion and "🧪 Potion Egg Collected!" or "🥚 Egg Collected!")
     local embedColor = isClover and 65280 or (isPotion and 10181046 or 14925732) -- Green for clover, Purple for potion, Beige for regular egg
 
     local embedFields = {}
@@ -3232,6 +3289,7 @@ local function moveToEgg(egg)
             setStatus("Timeout!", Color3.fromRGB(255, 80, 80))
             if State.currentEggInstance then
                 ignoredEggs[State.currentEggInstance] = true
+                trackTargetAction(State.currentEggInstance, "Ignored (Timeout or Error)")
             end
             break
         end
@@ -3254,7 +3312,10 @@ local function moveToEgg(egg)
         -- Check if it became transparent/collected mid-walk
         if isEggCollected(egg.instance) then
             setStatus("Egg already transparent!", Color3.fromRGB(255, 180, 0))
-            if State.currentEggInstance then ignoredEggs[State.currentEggInstance] = true end
+            if State.currentEggInstance then 
+                ignoredEggs[State.currentEggInstance] = true 
+                trackTargetAction(State.currentEggInstance, "Ignored (Already collected)")
+            end
             cleanup()
             return false -- Gracefully exit without triggering "Pathfinding Failed" webhook
         end
@@ -3309,6 +3370,9 @@ local function moveToEgg(egg)
     end
 
     if egg.part and egg.part.Parent then
+        if State.currentEggInstance then
+            trackTargetAction(State.currentEggInstance, "Failed to pathfind")
+        end
         local posFormat = tostring(egg.part.CFrame)
         local itemName = egg.name == "Clover" and "clover" or "egg"
         task.spawn(function()
@@ -3456,6 +3520,7 @@ local function startFarming()
             -- Check rare queue mid-loop (interrupt normal farming for rare eggs)
             if #rareEggQueue > 0 then break end
             if egg.part and egg.part.Parent then
+                trackTargetAction(egg.instance, "Moving to collect")
                 local collected = moveToEgg(egg)
                 task.wait(0.3)
                 if collected and Config.Enabled then

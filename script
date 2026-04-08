@@ -637,7 +637,7 @@ local versionLbl = Instance.new("TextLabel")
 versionLbl.Size = UDim2.new(0, 50, 1, 0)
 versionLbl.Position = UDim2.new(1, -95, 0, 0)
 versionLbl.BackgroundTransparency = 1
-versionLbl.Text = "v1.13" -- CHANGE IT ALWAYS AFTER UPDATING SCRIPT +0.01 (dont remove this comment)
+versionLbl.Text = "v1.14" -- CHANGE IT ALWAYS AFTER UPDATING SCRIPT +0.01 (dont remove this comment)
 versionLbl.TextColor3 = Color3.fromRGB(100, 100, 130)
 versionLbl.TextSize = 11
 versionLbl.Font = Enum.Font.GothamBold
@@ -1840,8 +1840,21 @@ local function closeGameInventory()
     for _, desc in ipairs(mi:GetDescendants()) do
         if desc:IsA("ImageLabel") and (desc.Image == "http://www.roblox.com/asset/?id=6031094678" or desc.Image == "rbxassetid://6031094678") then
             if desc.Parent and (desc.Parent:IsA("ImageButton") or desc.Parent:IsA("TextButton")) then
-                targetBtn = desc.Parent
-                break
+                -- Проверяем видимость (чтобы не схватить кнопку от закрытого меню)
+                local isVisible = true
+                local curr = desc.Parent
+                while curr and curr ~= mi do
+                    if curr:IsA("GuiObject") and not curr.Visible then
+                        isVisible = false
+                        break
+                    end
+                    curr = curr.Parent
+                end
+                
+                if isVisible then
+                    targetBtn = desc.Parent
+                    break
+                end
             end
         end
     end
@@ -2869,7 +2882,32 @@ local function autoEquipAbyssal()
     end
 
     setStatus("Equipping Abyssal...", Color3.fromRGB(140, 60, 255))
-    toggleInventory()
+    
+    local wasAurasOpen = false
+    local mi = PlayerGui:FindFirstChild("MainInterface")
+    if mi then
+        for _, frame in ipairs(mi:GetChildren()) do
+            if frame:IsA("Frame") and frame.Visible then
+                local hasRegularTab = false
+                pcall(function()
+                    for _, desc in ipairs(frame:GetDescendants()) do
+                        if (desc:IsA("TextLabel") or desc:IsA("TextButton")) and string.match(string.lower(desc.Text or ""), "^regular") then
+                            hasRegularTab = true
+                            break
+                        end
+                    end
+                end)
+                if hasRegularTab then
+                    wasAurasOpen = true
+                    break
+                end
+            end
+        end
+    end
+
+    if not wasAurasOpen then
+        toggleInventory()
+    end
 
     task.wait(0.2)
     -- Switch to the 'Regular' tab before searching
@@ -2954,7 +2992,7 @@ local function autoEquipAbyssal()
 
     if not auraClicked then
         setStatus("Abyssal not found!", Color3.fromRGB(255, 180, 0))
-        toggleInventory()
+        closeGameInventory()
         return
     end
 
@@ -3007,26 +3045,7 @@ local function autoEquipAbyssal()
 
     task.wait(0.2)
 
-    -- Close inventory panel via MainInterface.Frame.TextLabel.ImageButton
-    pcall(function()
-        local mi = PlayerGui:FindFirstChild("MainInterface")
-        if mi then
-            -- Find the top-level Frame in MainInterface (the inventory panel)
-            for _, frame in ipairs(mi:GetChildren()) do
-                if frame:IsA("Frame") then
-                    -- Look for TextLabel.ImageButton (close button)
-                    local titleLabel = frame:FindFirstChildWhichIsA("TextLabel")
-                    if titleLabel then
-                        local closeBtn = titleLabel:FindFirstChildWhichIsA("ImageButton")
-                        if closeBtn then
-                            cleverClick(closeBtn)
-                            break
-                        end
-                    end
-                end
-            end
-        end
-    end)
+    closeGameInventory()
 end
 
 ---------------------------------------

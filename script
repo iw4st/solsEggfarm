@@ -145,6 +145,7 @@ local EXCLUDED_ZONES = {
     { cframe = CFrame.new(-39.512001, 102.799988, -79.0240021, 1, 0, 0, 0, 1, 0, 0, 0, 1), size = Vector3.new(10, 10, 10) },
     { cframe = CFrame.new(202.722015, 103.999969, -660.192017, 1, 0, 0, 0, 1, 0, 0, 0, 1), size = Vector3.new(10, 10, 10) },
     { cframe = CFrame.new(221.343155, 96.5700226, -609.875244, 0, 0, 1, 0, 1, -0, -1, 0, 0), size = Vector3.new(20, 20, 20) },
+    { cframe = CFrame.new(155.315994, 97.8000336, -689.891968, 1, 0, 0, 0, 1, 0, 0, 0, 1), size = Vector3.new(20, 20, 20) },
 }
 
 local function isPositionExcluded(pos)
@@ -3341,3 +3342,4 @@ if Config.Enabled then
 end
 
 warn("[SolsFarm] V3 Settings Script fully loaded and successfully started!")
+ 

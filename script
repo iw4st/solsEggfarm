@@ -62,6 +62,7 @@ local Config = {
     WEBHOOK_AURAS = "",
     WEBHOOK_ENABLED = false,
     WEBHOOK_PING_ID = "",
+    VIP_SERVER_LINK = "",
     PING_MERCHANT_JESTER = true,
     PING_MERCHANT_RIN = true,
     PING_MERCHANT_MARI = true,
@@ -119,6 +120,7 @@ local State = {
 }
 
 local ignoredEggs = setmetatable({}, {__mode = "k"})
+local sendGenericWebhook = nil
 
 game:GetService("LogService").MessageOut:Connect(function(message, messageType)
     if message:match("Invalid egg") and State.currentEggInstance then
@@ -135,6 +137,14 @@ local EXCLUDED_ZONES = {
     { center = Vector3.new(16.326, 93.75, -438.988), radius = 20 },
     { center = Vector3.new(235.3, 95.8, -622.64), radius = 40 },
     { cframe = CFrame.new(120.687668, 108.350014, -395.919312, 1, -0, 0, 0, 1, -0, 0, 0, 1), size = Vector3.new(25, 15, 25) },
+    { cframe = CFrame.new(365, 95, -71, 0, 0, 1, 0, 1, 0, -1, 0, 0), size = Vector3.new(20, 20, 20) },
+    { cframe = CFrame.new(-64, 96, -151, 0, 0, 1, 0, 1, 0, -1, 0, 0), size = Vector3.new(20, 20, 20) },
+    { cframe = CFrame.new(-10, 95, -138, 0, 0, 1, 0, 1, 0, -1, 0, 0), size = Vector3.new(20, 20, 20) },
+    { cframe = CFrame.new(123, 102, -387, 0, 0, 1, 0, 1, 0, -1, 0, 0), size = Vector3.new(10, 10, 10) },
+    { cframe = CFrame.new(-48.8700027, 95.6000137, -110.410004, 1, 0, 0, 0, 1, 0, 0, 0, 1), size = Vector3.new(10, 10, 10) },
+    { cframe = CFrame.new(-39.512001, 102.799988, -79.0240021, 1, 0, 0, 0, 1, 0, 0, 0, 1), size = Vector3.new(10, 10, 10) },
+    { cframe = CFrame.new(202.722015, 103.999969, -660.192017, 1, 0, 0, 0, 1, 0, 0, 0, 1), size = Vector3.new(10, 10, 10) },
+    { cframe = CFrame.new(221.343155, 96.5700226, -609.875244, 0, 0, 1, 0, 1, -0, -1, 0, 0), size = Vector3.new(20, 20, 20) },
 }
 
 local function isPositionExcluded(pos)
@@ -230,6 +240,7 @@ local function findAllEggs()
                 end
 
                 if isPositionExcluded(part.Position) then
+                    pcall(function() obj:Destroy() end)
                     continue
                 end
 
@@ -287,7 +298,10 @@ local function findClovers()
         -- Height & excluded zone check (same as eggs)
         if part.Position.Y > Config.MAX_EGG_HEIGHT then continue end
 
-        if isPositionExcluded(part.Position) then continue end
+        if isPositionExcluded(part.Position) then 
+            pcall(function() model:Destroy() end)
+            continue 
+        end
 
         -- Find proximity prompt
         local prompt = model:FindFirstChildWhichIsA("ProximityPrompt", true)
@@ -610,7 +624,7 @@ local versionLbl = Instance.new("TextLabel")
 versionLbl.Size = UDim2.new(0, 50, 1, 0)
 versionLbl.Position = UDim2.new(1, -95, 0, 0)
 versionLbl.BackgroundTransparency = 1
-versionLbl.Text = "v1.02"
+versionLbl.Text = "v1.11" -- CHANGE IT ALWAYS AFTER UPDATING SCRIPT +0.01 (dont remove this comment)
 versionLbl.TextColor3 = Color3.fromRGB(100, 100, 130)
 versionLbl.TextSize = 11
 versionLbl.Font = Enum.Font.GothamBold
@@ -1050,6 +1064,7 @@ createWebhookInput(526, "Rare Eggs", "WEBHOOK_RARE_EGGS")
 createWebhookInput(582, "Merchants", "WEBHOOK_MERCHANTS")
 createWebhookInput(638, "Aura Rolls", "WEBHOOK_AURAS")
 createWebhookInput(694, "Discord Ping ID", "WEBHOOK_PING_ID", "Paste Discord ID...")
+createWebhookInput(720, "Private Server Link", "VIP_SERVER_LINK", "Paste your server link...")
 
 createSectionHeader(750, "\u{1F4E2}  Merchant Pings")
 createSettingsToggle(776, "Ping on Jester", "PING_MERCHANT_JESTER")
@@ -2176,7 +2191,7 @@ local function getPingText()
     return ""
 end
 
-local function sendGenericWebhook(webhookUrl, title, description, color, ping, fields)
+sendGenericWebhook = function(webhookUrl, title, description, color, ping, fields)
     -- Debug: check if webhooks are enabled
     if not Config.WEBHOOK_ENABLED then
         warn("[Webhook] SKIPPED (disabled): " .. tostring(title))
@@ -2187,8 +2202,13 @@ local function sendGenericWebhook(webhookUrl, title, description, color, ping, f
         return
     end
 
+    local finalPing = ping or ""
+    if finalPing ~= "" and Config.VIP_SERVER_LINK and Config.VIP_SERVER_LINK ~= "" then
+        finalPing = finalPing .. "\n\n🔗 **Join server:** " .. Config.VIP_SERVER_LINK
+    end
+
     local data = {
-        ["content"] = ping or "",
+        ["content"] = finalPing,
         ["allowed_mentions"] = { ["parse"] = {"users", "roles"} },
         ["embeds"] = {{
             ["title"] = title,
@@ -2564,52 +2584,91 @@ end)
 table.insert(State.Connections, rareEggAddedConn)
 
 local lastWeather = ""
-local function checkWeather()
-    local lbl = nil
-    pcall(function()
-        lbl = Players.LocalPlayer.PlayerGui.MainInterface:FindFirstChild("TextLabel")
-        if lbl then lbl = lbl:FindFirstChild("TextLabel") end
-        if not lbl then
-            local child8 = Players.LocalPlayer.PlayerGui.MainInterface:GetChildren()[8]
-            if child8 then lbl = child8:FindFirstChild("TextLabel") or child8 end
+
+local function isValidBiome(name)
+    local lower = string.lower(name)
+    if lower == "none" or lower == "tip" or lower == "system" then return false end
+    if lower == "normal" then return true end
+    for k, v in pairs(WEATHER_COLORS) do
+        if string.find(lower, k) then return true end
+    end
+    return false
+end
+
+local function updateWeatherStatus(rawText)
+    local text = string.lower(rawText)
+    if text ~= lastWeather and rawText ~= "" and text ~= "label" then
+        lastWeather = text
+
+        local isGlitched = false
+        if string.find(text, "glitch") or (string.match(rawText, "[%?@!%$#%^&]") and string.match(rawText, "%d")) then
+            isGlitched = true
         end
-    end)
 
-    if lbl and lbl:IsA("TextLabel") then
-        local rawText = lbl.Text
-        local text = string.lower(rawText)
-        if text ~= lastWeather and rawText ~= "" and text ~= "label" then
-            lastWeather = text
+        local biomeName = text
+        local color = WEATHER_COLORS.normal
+        local ping = ""
 
-            local isGlitched = false
-            if string.find(text, "glitch") or (string.match(rawText, "[%?@!%$#%^&]") and string.match(rawText, "%d")) then
-                isGlitched = true
+        if isGlitched then
+            biomeName = "glitched"
+        else
+            for k, v in pairs(WEATHER_COLORS) do
+                if string.find(text, k) then
+                    biomeName = k
+                    color = v
+                    break
+                end
             end
+        end
 
-            local biomeName = text
-            local color = WEATHER_COLORS.normal
-            local ping = ""
+        if biomeName == "glitched" then color = WEATHER_COLORS.glitched end
 
-            if isGlitched then
-                biomeName = "glitched"
-            else
-                for k, v in pairs(WEATHER_COLORS) do
-                    if string.find(text, k) then
-                        biomeName = k
-                        color = v
+        if biomeName == "dreamspace" or biomeName == "glitched" or biomeName == "cyberspace" then
+            ping = Config.WEBHOOK_PING_ID and getPingText() or ""
+        end
+
+        -- Make it clean
+        if string.find(biomeName, "none") then return end
+
+        sendGenericWebhook(Config.WEBHOOK_WEATHER, "🌦 Weather Changed!", "Biome: **" .. rawText .. "**", color, ping)
+    end
+end
+
+local function checkWeather()
+    local rawText = nil
+    pcall(function()
+        local mi = Players.LocalPlayer.PlayerGui.MainInterface
+        for _, obj in ipairs(mi:GetDescendants()) do
+            if obj:IsA("TextLabel") then
+                local txt = obj.Text
+                if txt and txt ~= "" and txt ~= "Label" and not string.match(txt, "^v%d+%.%d+") then
+                    local inner = string.match(txt, "^%[%s*(.-)%s*%]$")
+                    if inner and isValidBiome(inner) then
+                        rawText = txt
+                        break
+                    -- Secondary check using ZIndex 2 as user suggested, for edge cases without brackets
+                    elseif (obj.ZIndex == 2 or obj.ZIndex == 3) and isValidBiome(txt) and not string.find(string.lower(txt), "none") then
+                        if not inner then rawText = "[ " .. string.upper(txt) .. " ]" end
                         break
                     end
                 end
             end
-
-            if biomeName == "glitched" then color = WEATHER_COLORS.glitched end
-
-            if biomeName == "dreamspace" or biomeName == "glitched" or biomeName == "cyberspace" then
-                ping = "<@1289915272731295787>"
-            end
-
-            sendGenericWebhook(Config.WEBHOOK_WEATHER, "🌦 Weather Changed!", "Biome: **" .. rawText .. "**", color, ping)
         end
+    end)
+
+    if rawText then
+        updateWeatherStatus(rawText)
+    end
+end
+
+local function checkWeatherMessage(text)
+    if not text or typeof(text) ~= "string" then return end
+    local cleanText = stripRichText(text)
+    
+    local biomeMatch = string.match(cleanText, "^%[([%a]+)%]%:")
+    if biomeMatch and isValidBiome(biomeMatch) then
+        local rawText = "[ " .. string.upper(biomeMatch) .. " ]"
+        updateWeatherStatus(rawText)
     end
 end
 
@@ -2621,6 +2680,7 @@ local function initChatMonitor()
                 checkRareEggMessage(msg.Text)
                 checkMerchantMessage(msg.Text)
                 checkAuraRollMessage(msg.Text)
+                checkWeatherMessage(msg.Text)
             end)
         end
     end)
@@ -2635,6 +2695,7 @@ local function initChatMonitor()
                         checkRareEggMessage(data.Message)
                         checkMerchantMessage(data.Message)
                         checkAuraRollMessage(data.Message)
+                        checkWeatherMessage(data.Message)
                     end
                 end)
             end
@@ -2649,6 +2710,7 @@ local function initChatMonitor()
                     checkRareEggMessage(obj.Text)
                     checkMerchantMessage(obj.Text)
                     checkAuraRollMessage(obj.Text)
+                    checkWeatherMessage(obj.Text)
                 end)
             end)
         end
@@ -2877,7 +2939,9 @@ local function moveToEgg(egg)
         if conError then conError:Disconnect() end
         if conWaypoint then conWaypoint:Disconnect() end
         pcall(function()
-            pathAgent:Stop()
+            if pathAgent and tostring(pathAgent.Status) ~= "Idle" then
+                pathAgent:Stop()
+            end
         end)
     end
 
@@ -2987,6 +3051,20 @@ local function moveToEgg(egg)
         return true
     end
 
+    if egg.part and egg.part.Parent then
+        local posFormat = tostring(egg.part.CFrame)
+        local itemName = egg.name == "Clover" and "clover" or "egg"
+        task.spawn(function()
+            sendGenericWebhook(
+                Config.WEBHOOK_URL,
+                "⚠️ Pathfinding Failed",
+                "Failed to collect " .. itemName .. " at: " .. posFormat,
+                16711680,
+                ""
+            )
+        end)
+    end
+
     return false
 end
 
@@ -2999,10 +3077,9 @@ local function startFarming()
     task.wait(0.5)
 
     local idleStartTime = tick()
+    local lastAfkJumpTime = tick()
 
     while Config.Enabled do
-        checkWeather()
-
         local hum = getHumanoid()
         if not hum or hum.Health <= 0 then
             setStatus("Waiting respawn...", Color3.fromRGB(255, 180, 0))
@@ -3105,6 +3182,13 @@ local function startFarming()
                 setStatus("Scanning...", Color3.fromRGB(255, 180, 0))
                 task.wait(Config.SEARCH_INTERVAL)
             end
+
+            if tick() - lastAfkJumpTime >= 30 then
+                local hum = getHumanoid()
+                if hum then hum.Jump = true end
+                lastAfkJumpTime = tick()
+            end
+
             continue
         end
 
@@ -3133,12 +3217,38 @@ local function startFarming()
     setStatus("Idle", Color3.fromRGB(70, 70, 90))
 end
 
+local function togglePrompts(state)
+    local routes = {
+        {"Map", "QuestBoard", "Proximity", "ProximityPrompt"},
+        {"Map", "17597ef9-f805-4ff9-9cd4-86652e056ef9", "Torso", "ProximityPrompt"},
+        {"Map", "UGCShop", "Title", "Attachment", "ProximityPrompt"},
+        {"Boss Portal", "Portal", "Attachment", "ProximityPrompt"},
+        {"Map", "Miscs", "FishShop", "NPC", "ProximityPrompt"},
+        {"Map", "Miscs", "Rig", "HumanoidRootPart", "ProximityPrompt"},
+        {"Map", "Miscs", "HoodedFigure", "ProximityPrompt"},
+        {"Map", "SHOP", "Jake", "ProximityPrompt"},
+    }
+    
+    for _, route in ipairs(routes) do
+        local current = Workspace
+        for _, name in ipairs(route) do
+            if current then
+                current = current:FindFirstChild(name)
+            end
+        end
+        if current and current:IsA("ProximityPrompt") then
+            current.Enabled = state
+        end
+    end
+end
+
 ---------------------------------------
 -- TOGGLE HANDLER
 ---------------------------------------
 ToggleBtn.MouseButton1Click:Connect(function()
     Config.Enabled = not Config.Enabled
     animateToggle(Config.Enabled)
+    togglePrompts(not Config.Enabled)
 
     if Config.Enabled then
         if State.FarmThread then
@@ -3157,6 +3267,7 @@ end)
 ---------------------------------------
 CloseBtn.MouseButton1Click:Connect(function()
     Config.Enabled = false
+    togglePrompts(true)
     task.wait(0.3)
 
     -- cleanup connections
@@ -3189,6 +3300,20 @@ end)
 ---------------------------------------
 updateEggCount()
 animateToggle(Config.Enabled)
+
+task.spawn(function()
+    while true do
+        pcall(checkWeather)
+        task.wait(1)
+    end
+end)
+
+local VirtualUser = game:GetService("VirtualUser")
+Player.Idled:Connect(function()
+    VirtualUser:Button2Down(Vector2.new(0,0),workspace.CurrentCamera.CFrame)
+    task.wait(1)
+    VirtualUser:Button2Up(Vector2.new(0,0),workspace.CurrentCamera.CFrame)
+end)
 
 if Config.Enabled then
     if State.FarmThread then

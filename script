@@ -1,6 +1,7 @@
 --[[
     SOLS RNG — Egg Farm v2
     Dark Horizontal GUI | Mobile Optimized
+    SimplePath AI Pathfinding Engine
 ]]
 
 ---------------------------------------
@@ -2587,6 +2588,8 @@ local lastWeather = ""
 local function isValidBiome(name)
     local lower = string.lower(name)
     if lower == "none" or lower == "tip" or lower == "system" then return false end
+    -- Reject egg-related labels (e.g. "GLITCHED EGG", "HATCH EGG", "ROYAL EGG") but allow "eggland"
+    if string.find(lower, "%segg") or (lower == "egg") then return false end
     if lower == "normal" then return true end
     for k, v in pairs(WEATHER_COLORS) do
         if string.find(lower, k) then return true end
@@ -2641,6 +2644,9 @@ local function checkWeather()
             if obj:IsA("TextLabel") then
                 local txt = obj.Text
                 if txt and txt ~= "" and txt ~= "Label" and not string.match(txt, "^v%d+%.%d+") then
+                    -- Skip any label that mentions eggs as a standalone word ("GLITCHED EGG", etc.) but not "eggland"
+                    local txtLower = string.lower(txt)
+                    if string.find(txtLower, "%segg") or (txtLower == "egg") then continue end
                     local inner = string.match(txt, "^%[%s*(.-)%s*%]$")
                     if inner and isValidBiome(inner) then
                         rawText = txt

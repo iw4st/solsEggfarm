@@ -142,6 +142,7 @@ local EXCLUDED_ZONES = {
     { cframe = CFrame.new(-10, 95, -138, 0, 0, 1, 0, 1, 0, -1, 0, 0), size = Vector3.new(20, 20, 20) },
     { cframe = CFrame.new(123, 102, -387, 0, 0, 1, 0, 1, 0, -1, 0, 0), size = Vector3.new(10, 10, 10) },
     { cframe = CFrame.new(-48.8700027, 95.6000137, -110.410004, 1, 0, 0, 0, 1, 0, 0, 0, 1), size = Vector3.new(10, 10, 10) },
+    { cframe = CFrame.new(-39.512001, 102.799988, -79.0240021, 1, 0, 0, 0, 1, 0, 0, 0, 1), size = Vector3.new(10, 10, 10) },
 }
 
 local function isPositionExcluded(pos)
